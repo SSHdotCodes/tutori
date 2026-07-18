@@ -17,6 +17,8 @@ def _blob(*parts):
 
 def diagram_family(question, say=""):
     text = _blob(question, say)
+    if "sky" in text and "blue" in text:
+        return "sky_blue"
     if ("rocket" in text or "spacecraft" in text or "launch" in text) and (
         "orbit" in text or "gravity turn" in text or "orbital" in text
     ):
@@ -72,6 +74,7 @@ def improve_step_board(question, step_index, say, board):
 
 def _template(family, step_index, question=""):
     templates = {
+        "sky_blue": _sky_blue,
         "rocket_orbit": _rocket_orbit,
         "model_access_directive": _model_access_directive,
         "no_code_platform": _no_code_platform,
@@ -86,8 +89,57 @@ def _template(family, step_index, question=""):
         "rainbow": _rainbow,
     }
     if family == "no_code_platform":
-        return templates[family](step_index, question)
-    return templates[family](step_index)
+        result = templates[family](step_index, question)
+    else:
+        result = templates[family](step_index)
+    # The default quick lesson has four steps and the former three-minute
+    # default had eight. Keep a trusted template clean for that whole window
+    # instead of letting late model coordinates pile clutter onto it. Very
+    # long lessons may begin a fresh model-authored chapter after step eight.
+    return [] if result is None and step_index < 8 else result
+
+
+def _sky_blue(i):
+    """A compact, scientifically accurate Rayleigh-scattering composition."""
+    steps = [
+        [
+            {"op": "title", "text": "Why the Sky Is Blue"},
+            {"op": "ellipse", "at": [5, 26], "w": 16, "h": 16,
+             "label": "Sun", "color": "orange"},
+            {"op": "ellipse", "at": [42, 29], "w": 15, "h": 12,
+             "label": "air molecule", "color": "purple"},
+            {"op": "ellipse", "at": [77, 38], "w": 16, "h": 14,
+             "label": "your eye", "color": "green"},
+            {"op": "arrow", "from": [21, 34], "to": [42, 35],
+             "label": "sunlight", "color": "ink"},
+        ],
+        [
+            {"op": "arrow", "from": [57, 37], "to": [77, 44],
+             "label": "blue to you", "color": "blue"},
+            {"op": "dot", "at": [77, 25], "label": "direct beam", "color": "red"},
+            {"op": "arrow", "from": [57, 34], "to": [77, 25],
+             "label": "red travels on", "color": "red"},
+        ],
+        [
+            {"op": "graph", "at": [8, 47], "w": 43, "h": 18,
+             "title": "", "xlabel": "wavelength",
+             "ylabel": "", "x_range": [400, 700],
+             "y_range": [0, 1],
+             "series": [{"label": "Rayleigh", "color": "blue",
+                         "points": [[400, 1.0], [450, 0.62], [500, 0.41],
+                                    [550, 0.28], [600, 0.20], [650, 0.14],
+                                    [700, 0.11]]}],
+             "markers": [{"at": [450, 0.62], "label": "blue", "color": "blue"},
+                         {"at": [650, 0.14], "label": "red", "color": "red"}]},
+        ],
+        [
+            {"op": "notes", "title": "What your eye sees",
+             "lines": ["air molecules redirect",
+                       "blue waves scatter most"],
+             "at": [59, 55], "color": "blue", "compact": True},
+        ],
+    ]
+    return steps[i] if i < len(steps) else None
 
 
 def _topic_title(question, fallback="How It Works"):

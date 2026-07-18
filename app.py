@@ -136,7 +136,7 @@ def run_turn(audio_path, typed_text, snapshot, chat, convo, profile,
 
     user_label = (typed_text or "").strip() or ("🎙️ …" if audio_path else "🖼️ (my whiteboard)")
     chat.append({"role": "user", "content": user_label})
-    chat.append({"role": "assistant", "content": "✏️ *warming up the marker…*"})
+    chat.append({"role": "assistant", "content": "✏️ *composing the first clean panel…*"})
     question_for_context = user_label
     says = []
     sent_steps = []
@@ -292,11 +292,14 @@ with gr.Blocks(
                     info="1 = total beginner, tiny steps · 5 = expert, fast and dense",
                 )
                 lesson_minutes = gr.Slider(
-                    1, 10, value=3, step=1, label="Lesson length (minutes)",
-                    info="Choose a quick explanation or a continuous 10-minute whiteboard session.",
+                    1, 10, value=1, step=1, label="Lesson length (minutes)",
+                    info="1 = quick Gemma lesson · 2–10 = deeper Hy3 whiteboard session.",
                 )
                 web_on = gr.Checkbox(True, label="🔎 Let Tutori research the web when useful")
-                voice_on = gr.Checkbox(True, label="🔊 Voice replies (Sesame CSM)")
+                voice_on = gr.Checkbox(
+                    True,
+                    label="🔊 Voice replies (Sesame CSM, with an instant device-voice fallback)",
+                )
 
             with gr.Accordion("🧠 What Tutori remembers about you", open=False):
                 gr.Markdown(

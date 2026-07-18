@@ -23,10 +23,10 @@ import json
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
 import requests
-from board_quality import improve_step_board
+from board_quality import diagram_family, improve_step_board
 
 if os.environ.get("TUTORI_DEBUG") == "1":
     import faulthandler
@@ -296,6 +296,61 @@ def openrouter_chat(messages, model=LLM_ID, max_tokens=512, temperature=0.35,
     return content
 
 
+def openrouter_chat_stream(messages, model=LLM_ID, max_tokens=512,
+                           temperature=0.35, json_mode=False,
+                           reasoning=None, timeout=240):
+    """Yield visible text from an OpenRouter SSE response as it arrives."""
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": int(max_tokens),
+        "temperature": float(temperature),
+        "stream": True,
+    }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+    if reasoning:
+        payload["reasoning"] = {"effort": reasoning, "exclude": True}
+    with requests.post(
+        f"{OPENROUTER_URL}/chat/completions",
+        headers=_headers(), json=payload, timeout=timeout, stream=True,
+    ) as response:
+        if not response.ok:
+            raise RuntimeError(
+                f"OpenRouter {model} returned {response.status_code}: "
+                f"{response.text[:240]}"
+            )
+        emitted = False
+        for raw_line in response.iter_lines(decode_unicode=True):
+            line = str(raw_line or "").strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                event = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if event.get("error"):
+                raise RuntimeError(f"OpenRouter {model} stream failed: {event['error']}")
+            choices = event.get("choices") or []
+            if not choices:
+                continue
+            content = (choices[0].get("delta") or {}).get("content")
+            if isinstance(content, str) and content:
+                emitted = True
+                yield content
+            elif isinstance(content, list):
+                for block in content:
+                    text = block.get("text") if isinstance(block, dict) else ""
+                    if text:
+                        emitted = True
+                        yield str(text)
+        if not emitted:
+            raise RuntimeError(f"OpenRouter {model} streamed no visible content")
+
+
 def llm_generate(messages, max_new_tokens=256, temperature=0.35):
     return openrouter_chat(
         messages, model=LLM_ID, max_tokens=max_new_tokens,
@@ -393,6 +448,25 @@ def parse_lesson_json(text):
         except Exception:
             continue
     return None
+
+
+def extract_lesson_steps(text):
+    """Find a step array even when a model wraps it in `lesson` or `response`."""
+    root = parse_lesson_json(text) or _first_json_object(text) or {}
+    queue = [root]
+    seen = set()
+    while queue:
+        obj = queue.pop(0)
+        if not isinstance(obj, dict) or id(obj) in seen:
+            continue
+        seen.add(id(obj))
+        steps = obj.get("steps")
+        if isinstance(steps, list) and any(isinstance(s, dict) for s in steps):
+            return steps
+        for value in obj.values():
+            if isinstance(value, dict):
+                queue.append(value)
+    return []
 
 
 # ---- board layout hygiene: the model's spatial reasoning is approximate, ----
@@ -1090,8 +1164,8 @@ def _normalize_op(op):
                     })
             op["markers"] = clean_markers
             op["title"] = str(op.get("title") or "")[:28]
-            op["xlabel"] = str(op.get("xlabel") or "x")[:14]
-            op["ylabel"] = str(op.get("ylabel") or "y")[:14]
+            op["xlabel"] = str(op["xlabel"] if "xlabel" in op else "x")[:14]
+            op["ylabel"] = str(op["ylabel"] if "ylabel" in op else "y")[:14]
         except Exception:
             op["series"] = []
 
@@ -1270,13 +1344,18 @@ def transcribe(audio_path):
 
 
 _SPOKEN_CLEAN = re.compile(r"[*_#`<>\[\]{}|\\~^]")
+_TTS_BLOCKED_UNTIL = 0.0
+_TTS_BLOCK_REASON = ""
 
 
 def synthesize(text):
     """Text -> (base64 MP3, estimated duration). Browser corrects from decoded audio."""
+    global _TTS_BLOCKED_UNTIL, _TTS_BLOCK_REASON
     spoken = _SPOKEN_CLEAN.sub("", text).strip()
     if not spoken:
         return None, 1.5
+    if time.time() < _TTS_BLOCKED_UNTIL:
+        return None, max(2.2, len(spoken.split()) * 0.36)
     try:
         payload = {
             "model": TTS_ID,
@@ -1286,15 +1365,21 @@ def synthesize(text):
         }
         r = requests.post(
             f"{OPENROUTER_URL}/audio/speech",
-            headers=_headers(), json=payload, timeout=180,
+            headers=_headers(), json=payload, timeout=45,
         )
         if not r.ok:
             raise RuntimeError(f"Sesame speech failed ({r.status_code}): {r.text[:200]}")
+        _TTS_BLOCK_REASON = ""
         return base64.b64encode(r.content).decode("ascii"), max(2.0, len(spoken.split()) / 2.25)
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"[tutori] TTS failed: {e!r}")
+        reason = str(e)
+        _TTS_BLOCK_REASON = reason[:220]
+        # OpenRouter account privacy rules can make the sole CSM provider
+        # unavailable. Avoid repeating a doomed request for every sentence;
+        # the browser will narrate locally during this short retry window.
+        if "ignored" in reason.lower() or "provider" in reason.lower() or "404" in reason:
+            _TTS_BLOCKED_UNTIL = time.time() + 60
+        print(f"[tutori] CSM unavailable; using browser voice: {reason[:220]}", flush=True)
         return None, max(2.2, len(spoken.split()) * 0.36)
 
 
@@ -1558,34 +1643,60 @@ def analyze_board(data_url):
 
 def build_agent_plan(question, history, profile, notes, board_now, board_observation,
                      minutes, web_on):
-    _, _, duration_guidance = _duration_spec(minutes)
-    user = {
-        "learner_request": question,
-        "recent_history": (history or [])[-6:],
-        "profile": profile or {},
-        "existing_research_notes": (notes or "")[:1200],
-        "current_board_ops": (board_now or [])[-60:],
-        "learner_board_observation": board_observation,
-        "target_length": duration_guidance,
-        "web_enabled": bool(web_on),
-        "today": datetime.date.today().isoformat(),
+    """Build a useful plan locally so teaching is not gated on a second LLM call.
+
+    Hy3 still performs the high-intelligence lesson generation. The old version
+    called Hy3 once to plan and again to teach, which doubled the time before the
+    learner saw a single mark. Deterministic routing is both faster and more
+    reliable for this small schema.
+    """
+    family = diagram_family(question)
+    if minutes <= 1:
+        sequence = ["answer directly", "show the mechanism", "name the key rule", "check understanding"]
+        chapters = [family or "one clean topic-specific diagram"]
+    elif minutes <= 3:
+        sequence = ["orient", "show the mechanism", "explain why", "apply", "summarize", "check understanding"]
+        chapters = [family or "main diagram", "evidence or worked example", "visual summary"]
+    else:
+        sequence = ["orient", "mechanism", "worked example", "misconception", "application", "synthesis"]
+        chapters = [family or "main diagram", "worked example", "deeper model", "summary"]
+    return {
+        "teaching_goal": question[:160],
+        "learner_gap": "answer the exact request with a visual mechanism",
+        "sequence": sequence,
+        "visual_chapters": chapters,
+        "continuity_action": "keep" if board_now else "clear",
+        "search_queries": _forced_search_queries(question) if web_on else [],
+        "known_diagram_family": family,
+        "learner_board_observation": board_observation[:500] if board_observation else "",
     }
-    raw = openrouter_chat(
-        [{"role": "system", "content": PLAN_SYSTEM},
-         {"role": "user", "content": json.dumps(user, ensure_ascii=False)}],
-        model=LLM_ID, max_tokens=3200, temperature=0.25,
-        json_mode=True, reasoning="low",
-    )
-    plan = parse_lesson_json(raw) or _first_json_object(raw) or {}
-    if not isinstance(plan, dict):
-        plan = {}
-    plan.setdefault("teaching_goal", question[:120])
-    plan.setdefault("sequence", ["orient", "explain", "apply", "check understanding"])
-    plan.setdefault("visual_chapters", ["topic-specific diagram", "worked example", "summary"])
-    plan.setdefault("continuity_action", "keep" if board_now else "clear")
-    if not web_on:
-        plan["search_queries"] = []
-    return plan
+
+
+def select_teacher_model(question, minutes, web_context="", board_observation=""):
+    """Use Nitro for a quick answer; reserve Hy3 for deeper agentic lessons."""
+    is_quick = int(minutes or 1) <= 1
+    simple = len(str(question).split()) <= 30 and not web_context and not board_observation
+    return COACH_ID if is_quick and simple else LLM_ID
+
+
+def known_quick_fallback(question):
+    """Reliable narration for the launch-chip lesson if a provider returns bad JSON."""
+    if diagram_family(question) != "sky_blue":
+        return []
+    return [
+        {"say": "Sunlight looks white because it contains all the visible colors. "
+                "As it enters the atmosphere, that light meets tiny air molecules.",
+         "board": []},
+        {"say": "Those molecules redirect short blue wavelengths much more strongly "
+                "than long red wavelengths, sending blue light toward your eyes.",
+         "board": []},
+        {"say": "This is Rayleigh scattering. Its strength rises sharply as wavelength "
+                "gets shorter, which is why the graph is highest in the blue region.",
+         "board": []},
+        {"say": "Because scattered blue light reaches you from every direction, the whole "
+                "sky appears blue. The direct redder light mostly keeps traveling onward.",
+         "board": []},
+    ]
 
 
 def _build_messages(question, history, profile, pace, web_context, agent_plan,
@@ -1677,7 +1788,7 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
             board_observation = analyze_board(board_snapshot)
 
         minutes, _, duration_guidance = _duration_spec(lesson_minutes)
-        yield {"type": "status", "status": "thinking", "detail": "Architecting the lesson…"}
+        yield {"type": "status", "status": "thinking", "detail": "Choosing the clearest teaching path…"}
         plan = build_agent_plan(question, history, profile, notes, board_now,
                                 board_observation, minutes, web_on)
 
@@ -1697,41 +1808,69 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
             if web_context:
                 yield {"type": "research", "notes": web_context}
 
-        yield {"type": "status", "status": "teaching",
-               "detail": f"Building a {minutes}-minute visual lesson…"}
-        msgs = _build_messages(
-            question, history, profile, pace, web_context, plan,
-            board_observation, duration_guidance, notes=notes or "", board_now=board_now,
-        )
-        # Hy3's low reasoning tokens count toward max_tokens; leave ample room
-        # for both the hidden deliberation and the long structured lesson.
-        max_tokens = min(20000, 5000 + minutes * 1300)
-        full_text = openrouter_chat(
-            msgs, model=LLM_ID, max_tokens=max_tokens, temperature=0.45,
-            json_mode=True, reasoning="low", timeout=360,
-        )
-        lesson = parse_lesson_json(full_text) or _first_json_object(full_text) or {}
-        raw_steps = lesson.get("steps") if isinstance(lesson, dict) else None
-        if not isinstance(raw_steps, list) or not raw_steps:
-            plain = re.sub(r"[{}\[\]\"]", "", full_text).strip()[:650]
-            raw_steps = [{"say": plain or "Let's try that lesson again.", "board": []}]
-
-        raw_steps = raw_steps[:24]
-        yield {"type": "status", "status": "teaching",
-               "detail": "Preparing Tutori's voice and marker strokes…"}
-
-        audio_futures = []
-        pool = ThreadPoolExecutor(max_workers=4) if voice_on else None
-        for raw in raw_steps:
-            say = _fix_text(str(raw.get("say") or "")).strip()[:650] if isinstance(raw, dict) else ""
-            audio_futures.append(pool.submit(synthesize, say) if pool and say else None)
-
+        teacher_model = select_teacher_model(question, minutes, web_context, board_observation)
+        deep_future = None
+        generation_pool = None
+        if teacher_model == LLM_ID:
+            # Hy3 is deliberately thoughtful but can take close to a minute
+            # before returning visible tokens through its OpenRouter provider.
+            # Start it now, then let Nitro teach a one-minute visual overview
+            # immediately. The deeper chapter arrives while that overview is
+            # already being spoken and drawn.
+            deep_minutes = max(1, minutes - 1)
+            _, _, deep_guidance = _duration_spec(deep_minutes)
+            deep_plan = dict(plan)
+            deep_plan["warm_start_context"] = (
+                "A one-minute Gemma visual overview plays first. Begin with a "
+                "fresh deeper chapter; avoid greetings and do not repeat the basic overview."
+            )
+            deep_msgs = _build_messages(
+                question, history, profile, pace, web_context, deep_plan,
+                board_observation, deep_guidance, notes=notes or "", board_now=board_now,
+            )
+            deep_tokens = min(18000, 3800 + deep_minutes * 1100)
+            generation_pool = ThreadPoolExecutor(max_workers=1)
+            deep_future = generation_pool.submit(
+                openrouter_chat, deep_msgs, model=LLM_ID,
+                max_tokens=deep_tokens, temperature=0.38,
+                json_mode=True, reasoning="low", timeout=360,
+            )
+            _, _, quick_guidance = _duration_spec(1)
+            quick_plan = dict(plan)
+            quick_plan["sequence"] = [
+                "answer directly", "show the mechanism", "name the key rule", "check understanding"
+            ]
+            quick_plan["visual_chapters"] = [
+                plan.get("known_diagram_family") or "one clean overview diagram"
+            ]
+            msgs = _build_messages(
+                question, history, profile, pace, web_context, quick_plan,
+                board_observation, quick_guidance, notes=notes or "", board_now=board_now,
+            )
+            teacher_model = COACH_ID
+            teacher_name = "Gemma Nitro"
+            max_tokens = 3200
+            reasoning = None
+            detail = "Gemma starts now while Hy3 prepares the deeper chapter…"
+        else:
+            teacher_name = "Gemma Nitro"
+            msgs = _build_messages(
+                question, history, profile, pace, web_context, plan,
+                board_observation, duration_guidance, notes=notes or "", board_now=board_now,
+            )
+            max_tokens = 3200
+            reasoning = None
+            detail = "Gemma Nitro is sketching the first panel…"
+        yield {"type": "status", "status": "teaching", "detail": detail}
+        pool = ThreadPoolExecutor(max_workers=3) if voice_on else None
         active_ops = list(board_now or [])[-80:]
         said = []
         n_steps = 0
-        for idx, raw_step in enumerate(raw_steps):
+
+        def prepare_step(raw_step, idx):
+            nonlocal active_ops
             if not isinstance(raw_step, dict):
-                continue
+                return None
             candidate = dict(raw_step)
             raw_board = candidate.get("board") or []
             controls = [op for op in raw_board if isinstance(op, dict)
@@ -1743,7 +1882,7 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
             )
             step = sanitize_step(candidate, idx)
             if not step:
-                continue
+                return None
             controls = [op for op in step["board"] if op.get("op") in ("clear", "erase")]
             draws = [op for op in step["board"] if op.get("op") not in ("clear", "erase")]
             active_ops = _apply_controls(active_ops, controls)
@@ -1755,19 +1894,97 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
             active_ops.extend(draws)
             active_ops = active_ops[-80:]
 
-            if audio_futures[idx] is not None:
+            audio_b64, dur = None, None
+            if pool and step["say"]:
+                future = pool.submit(synthesize, step["say"])
                 try:
-                    audio_b64, dur = audio_futures[idx].result(timeout=200)
+                    # Never hold the first visible panel hostage to a slow TTS
+                    # provider. The client narrates locally if this deadline wins.
+                    audio_b64, dur = future.result(timeout=6 if idx == 0 else 3)
+                except FutureTimeout:
+                    print(f"[tutori] CSM step {idx + 1} exceeded the fast path; "
+                          "using browser voice", flush=True)
                 except Exception as exc:
                     print(f"[tutori] voice step {idx + 1} failed: {exc!r}", flush=True)
-                    audio_b64, dur = None, None
-            else:
-                audio_b64, dur = None, None
             step["audio"] = audio_b64
             step["dur"] = dur or max(2.2, len(step["say"].split()) / 2.25)
+            step["voice_fallback"] = bool(voice_on and not audio_b64)
+            return step
+
+        # Nitro usually returns this four-step chapter in a few seconds. Its
+        # provider occasionally emits partial/cumulative SSE chunks, so a
+        # normal JSON response is measurably more reliable than reconstructing
+        # the lesson client-side and is still dramatically faster than Hy3.
+        full_text = ""
+        raw_steps = []
+        best_text, best_steps = "", []
+        for attempt, temperature in enumerate((0.34, 0.20, 0.10), start=1):
+            candidate_text = openrouter_chat(
+                msgs, model=teacher_model, max_tokens=max_tokens,
+                temperature=temperature, json_mode=True, reasoning=reasoning,
+                timeout=180,
+            )
+            candidate_steps = extract_lesson_steps(candidate_text)
+            if len(candidate_steps) > len(best_steps):
+                best_text, best_steps = candidate_text, candidate_steps
+            if len(candidate_steps) >= 3:
+                break
+            print(f"[tutori] Nitro attempt {attempt} returned "
+                  f"{len(candidate_steps)} lesson steps; retrying", flush=True)
+        full_text, raw_steps = best_text, best_steps
+        reliable = known_quick_fallback(question)
+        if len(raw_steps) < 3 and reliable:
+            print("[tutori] using the verified quick lesson fallback", flush=True)
+            raw_steps = reliable
+        elif not raw_steps:
+            plain = re.sub(r"[{}\[\]\"]", "", full_text).strip()[:650]
+            raw_steps = [{"say": plain or "Let's build that idea one clean step at a time.",
+                          "board": []}]
+        print(f"[tutori] quick chapter: {len(raw_steps)} raw steps, "
+              f"{len(full_text)} chars", flush=True)
+        for idx, raw_step in enumerate(raw_steps[:8]):
+            step = prepare_step(raw_step, idx)
+            if not step:
+                continue
+            if n_steps == 0:
+                print(f"[tutori] first panel ready in {time.time() - t0:.1f}s "
+                      f"via {teacher_name}", flush=True)
             said.append(step["say"])
             n_steps += 1
             yield {"type": "step", "step": step}
+        if deep_future is not None:
+            yield {"type": "status", "status": "thinking",
+                   "detail": "Hy3 is preparing the deeper whiteboard chapter…"}
+            try:
+                deep_text = deep_future.result(timeout=360)
+                deep_steps = extract_lesson_steps(deep_text)
+                print(f"[tutori] Hy3 deeper chapter: {len(deep_steps)} raw steps, "
+                      f"{len(deep_text)} chars", flush=True)
+                for deep_idx, raw_step in enumerate(deep_steps):
+                    if n_steps >= 24:
+                        break
+                    raw_step = dict(raw_step) if isinstance(raw_step, dict) else raw_step
+                    if deep_idx == 0 and isinstance(raw_step, dict):
+                        raw_board = list(raw_step.get("board") or [])
+                        if not any(isinstance(op, dict) and op.get("op") == "clear"
+                                   for op in raw_board):
+                            raw_step["board"] = [{"op": "clear"}] + raw_board
+                    # Indices 0-7 are reserved for trusted quick templates.
+                    # Starting the deeper chapter at 8 lets Hy3 use its own
+                    # coordinates after the explicit chapter clear.
+                    step = prepare_step(raw_step, 8 + deep_idx)
+                    if not step:
+                        continue
+                    said.append(step["say"])
+                    n_steps += 1
+                    yield {"type": "step", "step": step}
+            except Exception as exc:
+                # The learner already received a complete quick lesson. A deep
+                # model hiccup should not turn that successful turn into an error.
+                print(f"[tutori] Hy3 deeper chapter unavailable: {exc!r}", flush=True)
+            finally:
+                if generation_pool:
+                    generation_pool.shutdown(wait=False)
         if pool:
             pool.shutdown(wait=False)
 

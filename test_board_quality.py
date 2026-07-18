@@ -106,11 +106,28 @@ class BoardQualityTests(unittest.TestCase):
         self.assertIn("Anthropic disputes scope", text)
 
     def test_common_topics_are_classified(self):
+        self.assertEqual(diagram_family("Why is the sky blue?"), "sky_blue")
         self.assertEqual(diagram_family("Teach me the Pythagorean theorem"), "pythagorean")
         self.assertEqual(diagram_family("How do neural networks learn?"), "neural_network")
         self.assertEqual(diagram_family("Explain supply and demand"), "supply_demand")
         self.assertEqual(diagram_family("How does Unqork work?"), "no_code_platform")
         self.assertEqual(diagram_family("What happened in space exploration this month?"), None)
+
+    def test_sky_blue_template_is_clean_and_scientifically_specific(self):
+        ns = load_engine_ns()
+        question = "Why is the sky blue?"
+        violations, ops = simulate_lesson(ns, _template_steps(question))
+        self.assertEqual(violations, [])
+        graph = next(op for op in ops if op.get("op") == "graph")
+        points = graph["series"][0]["points"]
+        self.assertGreater(points[0][1], points[-1][1])
+        text = " ".join(
+            [str(op.get(key, "")) for op in ops for key in ("text", "label", "title")]
+            + [str(line) for op in ops for line in (op.get("lines") or [])]
+        ).lower()
+        self.assertIn("blue to you", text)
+        self.assertIn("red travels on", text)
+        self.assertIn("blue waves scatter most", text)
 
     def test_checkin_steps_stay_empty_when_model_drew_nothing(self):
         board = improve_step_board("Explain caching", 3, "Does that make sense so far?", [])

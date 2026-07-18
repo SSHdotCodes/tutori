@@ -32,12 +32,12 @@
     actx: null, bakedOps: [],          // committed agent ops [{op, seed}]
     userStrokes: [],                   // [{color, size, eraser, pts:[[x,y]..]}]
     queue: [], playing: false, curTurn: null, enqueued: 0,
-    curAudio: null, raf: 0,
+    curAudio: null, curSpeech: null, raf: 0,
     tool: { mode: "pen", color: "#2563eb", size: 0.45 },
     scale: 1, offX: 0, offY: 0,
     opSeedCounter: 1,
     voiceOn: true,
-    keepBoardUntil: 0,
+    keepBoardUntil: 0, serverDone: false, voicePrimed: false,
     scrollTid: 0,
   };
 
@@ -80,10 +80,10 @@
 
   function drawLine(ctx, rnd, a, b, color, frac, width, dash) {
     if (dash) ctx.setLineDash([7, 7]);
-    // two passes for the sketchy double-stroke look
-    const wob = Math.min(3.2, S.scale * 0.55);
+    // A single restrained marker stroke stays hand-drawn without becoming
+    // the fuzzy double line that made dense science diagrams hard to read.
+    const wob = Math.min(1.45, S.scale * 0.28);
     strokePts(ctx, jitterSeg(rnd, a[0], a[1], b[0], b[1], wob), frac, color, width);
-    strokePts(ctx, jitterSeg(rnd, a[0], a[1], b[0], b[1], wob), frac, color, width * 0.55);
     ctx.setLineDash([]);
   }
 
@@ -104,10 +104,10 @@
   function ellipsePts(rnd, cx, cy, rx, ry) {
     const [pcx, pcy] = px([cx, cy]);
     const prx = rx * S.scale, pry = ry * S.scale;
-    const n = 34, start = rnd() * Math.PI * 2, pts = [];
-    const wob = Math.min(2.6, S.scale * 0.45);
+    const n = 38, start = rnd() * Math.PI * 2, pts = [];
+    const wob = Math.min(1.35, S.scale * 0.24);
     for (let i = 0; i <= n; i++) {
-      const t = start + (i / n) * Math.PI * 2.08; // slight overlap = sketchy close
+      const t = start + (i / n) * Math.PI * 2.015;
       pts.push([
         pcx + Math.cos(t) * prx + (rnd() - 0.5) * wob,
         pcy + Math.sin(t) * pry + (rnd() - 0.5) * wob,
@@ -620,12 +620,54 @@
     return arr.buffer;
   }
 
+  function speakWithDevice(text, done) {
+    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance || !text) {
+      done(); return null;
+    }
+    const utterance = new SpeechSynthesisUtterance(String(text));
+    utterance.rate = 1.04;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v => /^en/i.test(v.lang) && /Samantha|Daniel|Ava|Alex|Google/i.test(v.name))
+                   || voices.find(v => /^en/i.test(v.lang));
+    if (preferred) utterance.voice = preferred;
+    let finished = false;
+    const finish = () => { if (!finished) { finished = true; done(); } };
+    utterance.onend = finish;
+    utterance.onerror = finish;
+    // Browser voices occasionally omit `end`; never stall the lesson forever.
+    setTimeout(finish, Math.max(6000, String(text).split(/\s+/).length * 520));
+    S.curSpeech = utterance;
+    window.speechSynthesis.speak(utterance);
+    return utterance;
+  }
+
+  function primeVoice() {
+    if (S.voicePrimed) return;
+    S.voicePrimed = true;
+    try { actx().resume(); } catch (_) {}
+    try {
+      if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+        const unlock = new SpeechSynthesisUtterance(" ");
+        unlock.volume = 0;
+        unlock.rate = 10;
+        window.speechSynthesis.speak(unlock);
+      }
+    } catch (_) {}
+  }
+
+  // Run inside the learner's click gesture, before the network request begins,
+  // so browsers that gate speech behind user activation allow the later lesson.
+  document.addEventListener("pointerdown", primeVoice, { capture: true, passive: true });
+
   // ---------- lesson playback ----------
   async function playStep(step) {
     const ops = (step.board || []).map(o => ({ op: o, seed: (S.opSeedCounter++ * 2654435761) >>> 0 }));
     let dur = step.dur || Math.max(2.2, String(step.say || "").split(/\s+/).length * 0.36);
     let src = null;
     let audioEnded = true;   // true while there is no source; set false when one starts
+    let speechEnded = true;
 
     if (step.audio && S.voiceOn) {
       try {
@@ -641,6 +683,12 @@
           src.onended = () => { audioEnded = true; };  // the ONLY reliable end signal
         }
       } catch (e) { src = null; }
+    }
+
+    if (!src && S.voiceOn && step.say) {
+      speechEnded = false;
+      setStatus("Speaking with your device while Sesame CSM is unavailable", "teaching");
+      speakWithDevice(step.say, () => { speechEnded = true; S.curSpeech = null; });
     }
 
     setCaption(step.say || "");
@@ -681,7 +729,8 @@
         // wait for the audio's real `ended` event — clock estimates start the
         // next clip while this one's tail is still audible (voices overlap).
         // el > dur + 2 is only a safety net if `ended` never fires.
-        const audioDone = audioEnded || el > dur + 2.0;
+        const audioDone = src ? (audioEnded || el > dur + 2.0)
+                              : (speechEnded || el > dur + 8.0);
         if (bakedIdx >= sched.length && audioDone) {
           live.clearRect(0, 0, S.liveCv.width, S.liveCv.height);
           setTimeout(resolve, 140);   // natural breath between steps
@@ -715,7 +764,10 @@
     S.playing = false;
     setTalking(false);
     if (S.queue.length) setTimeout(pump, 120);         // interrupted mid-queue: retry
-    else setCaption("");
+    else {
+      setCaption("");
+      if (S.serverDone) setStatus("", "idle");
+    }
   }
 
   // ---------- public API ----------
@@ -755,7 +807,9 @@
     if (p.turn && p.turn !== S.curTurn) {        // a new turn begins
       S.curTurn = p.turn;
       S.enqueued = 0;
+      S.serverDone = false;
       S.stopFlag = true;                          // fast-forward whatever is playing
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
       setTimeout(() => { S.stopFlag = false; }, 50);
       S.queue = [];
       // Gradio may focus the transcript/input after submit, which scrolls the
@@ -781,7 +835,10 @@
     }
     if (S.queue.length) setTimeout(pump, 30);
     if (p.status === "done" || p.status === "error") {
-      setTimeout(() => setStatus("", "idle"), p.status === "error" ? 6000 : 1500);
+      S.serverDone = p.status === "done";
+      if (p.status === "error" || (!S.playing && !S.queue.length)) {
+        setTimeout(() => setStatus("", "idle"), p.status === "error" ? 6000 : 500);
+      }
     }
   };
 
@@ -798,7 +855,12 @@
     return out.toDataURL("image/png");
   };
 
-  window.tutoriStop = () => { S.stopFlag = true; S.queue = []; setTimeout(() => { S.stopFlag = false; }, 60); };
+  window.tutoriStop = () => {
+    S.stopFlag = true; S.queue = [];
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    S.curSpeech = null;
+    setTimeout(() => { S.stopFlag = false; }, 60);
+  };
 
   // Snapshot only when the learner has actually drawn something (saves vision tokens).
   window.tutoriSnapshotIfInk = () =>
