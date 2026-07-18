@@ -687,7 +687,7 @@
 
     if (!src && S.voiceOn && step.say) {
       speechEnded = false;
-      setStatus("Speaking with your device while Sesame CSM is unavailable", "teaching");
+      setStatus("Device voice active · CSM unavailable", "teaching");
       speakWithDevice(step.say, () => { speechEnded = true; S.curSpeech = null; });
     }
 
