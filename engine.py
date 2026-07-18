@@ -5,7 +5,7 @@ Models (all open-weight, all routed through OpenRouter):
   * tencent/hy3 ......................... lesson architect + teacher
   * google/gemma-4-31b-it:nitro ......... fast coach + whiteboard vision
   * nvidia/parakeet-tdt-0.6b-v3 ......... speech recognition
-  * sesame/csm-1b ....................... conversational speech
+  * hexgrad/kokoro-82m .................. fast open-weight speech
 
 run_turn() is a generator that yields event dicts; app.py turns those into
 streaming UI updates. Events:
@@ -36,8 +36,8 @@ OPENROUTER_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/ap
 LLM_ID = os.environ.get("TUTORI_INTELLIGENCE_MODEL", "tencent/hy3")
 COACH_ID = os.environ.get("TUTORI_FAST_MODEL", "google/gemma-4-31b-it:nitro")
 ASR_ID = os.environ.get("TUTORI_ASR_MODEL", "nvidia/parakeet-tdt-0.6b-v3")
-TTS_ID = os.environ.get("TUTORI_TTS_MODEL", "sesame/csm-1b")
-TTS_VOICE = os.environ.get("TUTORI_TTS_VOICE", "conversational_a")
+TTS_ID = os.environ.get("TUTORI_TTS_MODEL", "hexgrad/kokoro-82m")
+TTS_VOICE = os.environ.get("TUTORI_TTS_VOICE", "af_alloy")
 USE_BOARD_MODEL = False
 BOARD_ARTIST = None
 
@@ -1368,18 +1368,18 @@ def synthesize(text):
             headers=_headers(), json=payload, timeout=45,
         )
         if not r.ok:
-            raise RuntimeError(f"Sesame speech failed ({r.status_code}): {r.text[:200]}")
+            raise RuntimeError(f"Kokoro speech failed ({r.status_code}): {r.text[:200]}")
         _TTS_BLOCK_REASON = ""
         return base64.b64encode(r.content).decode("ascii"), max(2.0, len(spoken.split()) / 2.25)
     except Exception as e:
         reason = str(e)
         _TTS_BLOCK_REASON = reason[:220]
-        # OpenRouter account privacy rules can make the sole CSM provider
+        # OpenRouter account privacy rules can make a speech provider
         # unavailable. Avoid repeating a doomed request for every sentence;
         # the browser will narrate locally during this short retry window.
         if "ignored" in reason.lower() or "provider" in reason.lower() or "404" in reason:
             _TTS_BLOCKED_UNTIL = time.time() + 60
-        print(f"[tutori] CSM unavailable; using browser voice: {reason[:220]}", flush=True)
+        print(f"[tutori] Kokoro unavailable; using browser voice: {reason[:220]}", flush=True)
         return None, max(2.2, len(spoken.split()) * 0.36)
 
 
@@ -1902,7 +1902,7 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
                     # provider. The client narrates locally if this deadline wins.
                     audio_b64, dur = future.result(timeout=6 if idx == 0 else 3)
                 except FutureTimeout:
-                    print(f"[tutori] CSM step {idx + 1} exceeded the fast path; "
+                    print(f"[tutori] Kokoro step {idx + 1} exceeded the fast path; "
                           "using browser voice", flush=True)
                 except Exception as exc:
                     print(f"[tutori] voice step {idx + 1} failed: {exc!r}", flush=True)

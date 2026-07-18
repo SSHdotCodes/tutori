@@ -687,7 +687,7 @@
 
     if (!src && S.voiceOn && step.say) {
       speechEnded = false;
-      setStatus("Device voice active · CSM unavailable", "teaching");
+      setStatus("Device voice active · Kokoro unavailable", "teaching");
       speakWithDevice(step.say, () => { speechEnded = true; S.curSpeech = null; });
     }
 

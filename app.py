@@ -67,7 +67,7 @@ HEADER_HTML = f"""
     <span class="badge hot">⚡ OpenRouter · open-weight only</span>
     <span class="badge">🧠 Tencent Hy3 teacher</span>
     <span class="badge">🧭 Gemma 4 31B coach</span>
-    <span class="badge">🗣️ Sesame CSM voice</span>
+    <span class="badge">🗣️ Kokoro 82M voice</span>
     <span class="badge">👂 NVIDIA Parakeet ears</span>
     <span class="badge">⏱️ Lessons up to 10 minutes</span>
   </div>
@@ -298,7 +298,7 @@ with gr.Blocks(
                 web_on = gr.Checkbox(True, label="🔎 Let Tutori research the web when useful")
                 voice_on = gr.Checkbox(
                     True,
-                    label="🔊 Voice replies (Sesame CSM, with an instant device-voice fallback)",
+                    label="🔊 Voice replies (Kokoro 82M, with an instant device-voice fallback)",
                 )
 
             with gr.Accordion("🧠 What Tutori remembers about you", open=False):
@@ -317,7 +317,7 @@ with gr.Blocks(
         "Hugging Face Build Small Hackathon</a>. "
         'Visit the <a href="https://huggingface.co/spaces/build-small-hackathon/tutori" '
         'target="_blank">original award-winning Space</a>. · '
-        "Hy3 teaches · Gemma coaches · CSM speaks · Parakeet listens."
+        "Hy3 teaches · Gemma coaches · Kokoro speaks · Parakeet listens."
         '<div id="made-by">Made by SSH/ProCreations</div></div>'
     )
 

@@ -50,7 +50,7 @@ renderer while using an open-weight OpenRouter model team:
 - `tencent/hy3` (low reasoning) for lesson architecture and teaching
 - `google/gemma-4-31b-it:nitro` for fast coaching and whiteboard vision
 - `nvidia/parakeet-tdt-0.6b-v3` for transcription
-- `sesame/csm-1b` for conversational text-to-speech
+- `hexgrad/kokoro-82m` with the `af_alloy` voice for fast text-to-speech
 
 The hosted edition adds 1–10 minute continuous lessons, agent-controlled clear
 and targeted erase actions, persistent whiteboard state, and a native scaled
