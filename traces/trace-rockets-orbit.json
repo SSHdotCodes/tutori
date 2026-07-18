@@ -1,0 +1,235 @@
+{
+ "question": "How do rockets actually reach orbit?",
+ "events": [
+  {
+   "t": 1.22,
+   "event": {
+    "type": "status",
+    "status": "thinking",
+    "detail": "Thinking\u2026"
+   }
+  },
+  {
+   "t": 8.19,
+   "event": {
+    "type": "status",
+    "status": "thinking",
+    "detail": "Deciding what context I need\u2026"
+   }
+  },
+  {
+   "t": 9.41,
+   "event": {
+    "type": "status",
+    "status": "teaching",
+    "detail": "Preparing your whiteboard lesson\u2026"
+   }
+  },
+  {
+   "t": 30.02,
+   "event": {
+    "type": "status",
+    "status": "teaching",
+    "detail": "Teaching \u2014 step 1"
+   }
+  },
+  {
+   "t": 30.02,
+   "event": {
+    "type": "step",
+    "step": {
+     "say": "To reach orbit, a rocket isn't just going up; it's mostly going sideways. We need to balance gravity against a massive horizontal velocity.",
+     "board": [
+      {
+       "op": "clear"
+      },
+      {
+       "op": "title",
+       "text": "The Path to Orbit"
+      },
+      {
+       "op": "axes",
+       "at": [
+        10.0,
+        25.0
+       ],
+       "w": 50.0,
+       "h": 40.0,
+       "xlabel": "Distance",
+       "ylabel": "Altitude"
+      }
+     ],
+     "audio": "<higgs-audio-v2 wav, 11.51s \u2014 stripped for repo size>",
+     "dur": 11.51,
+     "i": 0
+    }
+   }
+  },
+  {
+   "t": 43.13,
+   "event": {
+    "type": "status",
+    "status": "teaching",
+    "detail": "Teaching \u2014 step 2"
+   }
+  },
+  {
+   "t": 43.13,
+   "event": {
+    "type": "step",
+    "step": {
+     "say": "First, the rocket fights gravity to gain altitude. This is the vertical climb where it clears the thickest part of the atmosphere.",
+     "board": [
+      {
+       "op": "curve",
+       "points": [
+        [
+         15.0,
+         65.0
+        ],
+        [
+         20.0,
+         50.0
+        ],
+        [
+         25.0,
+         35.0
+        ]
+       ],
+       "color": "blue"
+      },
+      {
+       "op": "dot",
+       "at": [
+        25.0,
+        35.0
+       ],
+       "color": "red",
+       "label": "Max Q",
+       "label_at": [
+        28.0,
+        18.0
+       ]
+      },
+      {
+       "op": "text",
+       "text": "Vertical Climb",
+       "at": [
+        15.0,
+        71.0
+       ],
+       "size": "s",
+       "color": "blue"
+      }
+     ],
+     "audio": "<higgs-audio-v2 wav, 8.96s \u2014 stripped for repo size>",
+     "dur": 8.96,
+     "i": 1
+    }
+   }
+  },
+  {
+   "t": 62.4,
+   "event": {
+    "type": "status",
+    "status": "teaching",
+    "detail": "Teaching \u2014 step 3"
+   }
+  },
+  {
+   "t": 62.4,
+   "event": {
+    "type": "step",
+    "step": {
+     "say": "Then, it performs a gravity turn. By tilting, the rocket converts its upward thrust into horizontal speed, which is what keeps it from falling back.",
+     "board": [
+      {
+       "op": "curve",
+       "points": [
+        [
+         25.0,
+         35.0
+        ],
+        [
+         40.0,
+         30.0
+        ],
+        [
+         60.0,
+         28.0
+        ]
+       ],
+       "color": "green"
+      },
+      {
+       "op": "arrow",
+       "from": [
+        60.0,
+        28.0
+       ],
+       "to": [
+        75.0,
+        28.0
+       ],
+       "label": "Orbital Velocity",
+       "color": "green",
+       "label_at": [
+        67.5,
+        19.0
+       ]
+      },
+      {
+       "op": "notes",
+       "title": "Key Goals",
+       "lines": [
+        "1. Escape Air",
+        "2. Gain Speed",
+        "3. Stay Sideways"
+       ],
+       "at": [
+        70.0,
+        45.0
+       ],
+       "color": "gray",
+       "compact": true
+      }
+     ],
+     "audio": "<higgs-audio-v2 wav, 11.51s \u2014 stripped for repo size>",
+     "dur": 11.51,
+     "i": 2
+    }
+   }
+  },
+  {
+   "t": 73.14,
+   "event": {
+    "type": "status",
+    "status": "teaching",
+    "detail": "Teaching \u2014 step 4"
+   }
+  },
+  {
+   "t": 73.14,
+   "event": {
+    "type": "step",
+    "step": {
+     "say": "Think of it like a ball thrown so fast that the curve of its fall matches the curve of the Earth. Does that distinction between height and speed make sense?",
+     "board": [],
+     "audio": "<higgs-audio-v2 wav, 11.46s \u2014 stripped for repo size>",
+     "dur": 11.46,
+     "i": 3
+    }
+   }
+  },
+  {
+   "t": 73.14,
+   "event": {
+    "type": "final",
+    "text": "To reach orbit, a rocket isn't just going up; it's mostly going sideways. We need to balance gravity against a massive horizontal velocity. First, the rocket fights gravity to gain altitude. This is the vertical climb where it clears the thickest part of the atmosphere. Then, it performs a gravity turn. By tilting, the rocket converts its upward thrust into horizontal speed, which is what keeps it from falling back. Think of it like a ball thrown so fast that the curve of its fall matches the curve of the Earth. Does that distinction between height and speed make sense?",
+    "error": null,
+    "question": "How do rockets actually reach orbit?"
+   }
+  }
+ ],
+ "note": "Verbatim agent trace from a live session on this Space. Timing in seconds from turn start. 'Researching:' status lines show the Nemotron 3 Nano planner's queries verbatim."
+}
