@@ -381,7 +381,12 @@ with gr.Blocks(
 
 
 if __name__ == "__main__":
+    _auth_user = os.environ.get("TUTORI_AUTH_USER")
+    _auth_pass = os.environ.get("TUTORI_AUTH_PASS")
+    if not (_auth_user and _auth_pass):
+        raise SystemExit("TUTORI_AUTH_USER and TUTORI_AUTH_PASS must be set")
     demo.queue(default_concurrency_limit=4).launch(
         server_name=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"),
         server_port=int(os.environ.get("PORT", os.environ.get("GRADIO_SERVER_PORT", "7860"))),
+        auth=(_auth_user, _auth_pass),
         ssr_mode=False, allowed_paths=[str(ROOT / "static")])
