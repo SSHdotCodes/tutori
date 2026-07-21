@@ -9,10 +9,14 @@ while routing an upgraded open-weight model team through OpenRouter.
 
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 
 import gradio as gr
+from fastapi import FastAPI, Request
+from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 
 # The API engine is the default everywhere; mock mode is explicit for offline UI work.
 if os.environ.get("TUTORI_MOCK") != "1":
@@ -42,6 +46,32 @@ CSS = (ROOT / "static" / "style.css").read_text()
 
 
 FONT_FACES = (ROOT / "static" / "fonts" / "faces.css").read_text()
+
+PUBLIC_URL = "https://tutori.ssh.codes/"
+SHARE_IMAGE_URL = f"{PUBLIC_URL}static/tutori-share.png?v=20260721"
+SOCIAL_DESCRIPTION = (
+    "Ask a question out loud and Tutori teaches it while drawing a clear, "
+    "live whiteboard lesson with open-weight AI."
+)
+SOCIAL_META = f"""
+<meta name="description" content="{SOCIAL_DESCRIPTION}" />
+<meta property="og:title" content="Tutori — your whiteboard tutor" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="{PUBLIC_URL}" />
+<meta property="og:site_name" content="Tutori" />
+<meta property="og:description" content="{SOCIAL_DESCRIPTION}" />
+<meta property="og:image" content="{SHARE_IMAGE_URL}" />
+<meta property="og:image:secure_url" content="{SHARE_IMAGE_URL}" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Tutori drawing a live lesson on a whiteboard" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Tutori — your whiteboard tutor" />
+<meta name="twitter:description" content="{SOCIAL_DESCRIPTION}" />
+<meta name="twitter:image" content="{SHARE_IMAGE_URL}" />
+<meta name="twitter:image:alt" content="Tutori drawing a live lesson on a whiteboard" />
+"""
 
 HEAD = f"""
 <style>{FONT_FACES}</style>
@@ -381,12 +411,56 @@ with gr.Blocks(
 
 
 if __name__ == "__main__":
-    _auth_user = os.environ.get("TUTORI_AUTH_USER")
-    _auth_pass = os.environ.get("TUTORI_AUTH_PASS")
-    if not (_auth_user and _auth_pass):
-        raise SystemExit("TUTORI_AUTH_USER and TUTORI_AUTH_PASS must be set")
-    demo.queue(default_concurrency_limit=4).launch(
+    # Keep Gradio as the application UI, but mount it in a tiny FastAPI shell so
+    # the public app has a stable image URL and one authoritative set of social
+    # metadata. Gradio 5 otherwise emits two conflicting sets of placeholder
+    # Open Graph tags, and many link unfurlers choose the first one.
+    web = FastAPI(title="Tutori")
+    web.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
+
+    @web.middleware("http")
+    async def tutori_social_metadata(request: Request, call_next):
+        response = await call_next(request)
+        if request.method != "GET" or request.url.path != "/":
+            return response
+        if "text/html" not in response.headers.get("content-type", ""):
+            return response
+
+        body = b"".join([chunk async for chunk in response.body_iterator])
+        page = body.decode("utf-8")
+        page = re.sub(
+            r"\s*<meta\s+(?:property|name)=\"(?:og:|twitter:)[^\"]+\"[^>]*?/?>",
+            "",
+            page,
+            flags=re.IGNORECASE,
+        )
+        page = page.replace("<head>", f"<head>\n{SOCIAL_META}", 1)
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        headers["cache-control"] = "no-cache"
+        return Response(
+            page,
+            status_code=response.status_code,
+            headers=headers,
+            media_type="text/html",
+        )
+
+    demo.queue(default_concurrency_limit=4)
+    web = gr.mount_gradio_app(
+        web,
+        demo,
+        path="/",
         server_name=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"),
         server_port=int(os.environ.get("PORT", os.environ.get("GRADIO_SERVER_PORT", "7860"))),
-        auth=(_auth_user, _auth_pass),
-        ssr_mode=False, allowed_paths=[str(ROOT / "static")])
+        auth=None,
+        ssr_mode=False,
+        allowed_paths=[str(ROOT / "static")],
+    )
+
+    import uvicorn
+
+    uvicorn.run(
+        web,
+        host=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"),
+        port=int(os.environ.get("PORT", os.environ.get("GRADIO_SERVER_PORT", "7860"))),
+    )
