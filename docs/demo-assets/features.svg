@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <rect width="1920" height="1080" fill="#f7f1df"/>
+  <pattern id="dots" width="44" height="44" patternUnits="userSpaceOnUse"><circle cx="4" cy="4" r="2" fill="#d7cdb5"/></pattern>
+  <rect width="1920" height="1080" fill="url(#dots)"/>
+  <rect x="80" y="72" width="1760" height="936" rx="50" fill="#fbf6e9" stroke="#d8c9a5" stroke-width="5"/>
+  <text x="145" y="190" fill="#173028" font-family="Helvetica Neue, Arial, sans-serif" font-size="72" font-weight="850">Built for a real lesson—</text>
+  <text x="145" y="270" fill="#173028" font-family="Helvetica Neue, Arial, sans-serif" font-size="72" font-weight="850">not a 30-second answer.</text>
+  <path d="M145 305 C390 286 640 320 900 300" stroke="#2f6cf5" stroke-width="10" fill="none" stroke-linecap="round"/>
+
+  <g font-family="Helvetica Neue, Arial, sans-serif">
+    <rect x="145" y="390" width="760" height="145" rx="32" fill="#e9efff" stroke="#a9bdf1" stroke-width="3"/>
+    <circle cx="220" cy="462" r="35" fill="#2f6cf5"/><text x="220" y="474" text-anchor="middle" fill="white" font-size="30" font-weight="800">3</text>
+    <text x="285" y="449" fill="#173028" font-size="34" font-weight="800">Three-minute default</text>
+    <text x="285" y="492" fill="#516277" font-size="25">with sessions up to ten minutes</text>
+
+    <rect x="1015" y="390" width="760" height="145" rx="32" fill="#eaf7ef" stroke="#a9d9bc" stroke-width="3"/>
+    <path d="M1084 438h70v56h-70z" fill="none" stroke="#21814f" stroke-width="8"/><path d="M1098 425h42" stroke="#21814f" stroke-width="8"/>
+    <text x="1188" y="449" fill="#173028" font-size="34" font-weight="800">Continuous whiteboard</text>
+    <text x="1188" y="492" fill="#516a59" font-size="25">agent-controlled erase + clear</text>
+
+    <rect x="145" y="575" width="760" height="145" rx="32" fill="#fff2b5" stroke="#e4c95c" stroke-width="3"/>
+    <path d="M191 646h64M223 614v64" stroke="#9d7e12" stroke-width="10" stroke-linecap="round"/>
+    <text x="285" y="634" fill="#173028" font-size="34" font-weight="800">Responsive controls</text>
+    <text x="285" y="677" fill="#6c6140" font-size="25">send, Enter, and examples react instantly</text>
+
+    <rect x="1015" y="575" width="760" height="145" rx="32" fill="#f1eaff" stroke="#c8b4ee" stroke-width="3"/>
+    <path d="M1085 644q35-50 70 0q-35 50-70 0" fill="none" stroke="#7352da" stroke-width="8"/>
+    <text x="1188" y="634" fill="#173028" font-size="34" font-weight="800">Calmer narration</text>
+    <text x="1188" y="677" fill="#645977" font-size="25">slower pace with pitch preserved</text>
+
+    <rect x="145" y="760" width="1630" height="145" rx="32" fill="#172e27"/>
+    <path d="M205 850V802M205 850h105M220 835l25-22l25 10l28-38" fill="none" stroke="#f4d66b" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="350" y="820" fill="#f7f1df" font-size="35" font-weight="800">Higher-quality graphs and diagrams</text>
+    <text x="350" y="865" fill="#a9bbb4" font-size="26">grids · ticks · legends · multi-series plots · collision-aware labels</text>
+  </g>
+</svg>

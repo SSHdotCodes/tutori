@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <rect width="1920" height="1080" fill="#173028"/>
+  <circle cx="120" cy="110" r="250" fill="#214238" opacity=".65"/>
+  <circle cx="1800" cy="1040" r="380" fill="#10271f" opacity=".8"/>
+  <text x="110" y="118" fill="#f7f1df" font-family="Helvetica Neue, Arial, sans-serif" font-size="46" font-weight="700">✏ Tutori</text>
+  <text x="1810" y="112" text-anchor="end" fill="#f4d66b" font-family="Helvetica Neue, Arial, sans-serif" font-size="28" font-weight="700" letter-spacing="4">BUILD WEEK ARCHITECTURE</text>
+
+  <text x="110" y="260" fill="#f7f1df" font-family="Helvetica Neue, Arial, sans-serif" font-size="88" font-weight="800">One intelligence.</text>
+  <text x="110" y="350" fill="#f7f1df" font-family="Helvetica Neue, Arial, sans-serif" font-size="88" font-weight="800">Every agent role.</text>
+
+  <rect x="650" y="405" width="620" height="220" rx="50" fill="#c9bcff" stroke="#7e61e8" stroke-width="7"/>
+  <circle cx="760" cy="515" r="56" fill="#7352da"/>
+  <circle cx="782" cy="493" r="54" fill="#c9bcff"/>
+  <text x="860" y="505" fill="#2e1d63" font-family="Helvetica Neue, Arial, sans-serif" font-size="58" font-weight="800">GPT-5.6 LUNA</text>
+  <text x="860" y="562" fill="#4b3684" font-family="Helvetica Neue, Arial, sans-serif" font-size="28" font-weight="700" letter-spacing="3">LOW REASONING · OPENROUTER</text>
+
+  <g fill="#fbf6e9" stroke="#dccfab" stroke-width="4" font-family="Helvetica Neue, Arial, sans-serif" font-size="32" font-weight="750" text-anchor="middle">
+    <rect x="160" y="430" width="300" height="112" rx="28"/><text x="310" y="500" fill="#173028" stroke="none">PLAN</text>
+    <rect x="160" y="585" width="300" height="112" rx="28"/><text x="310" y="655" fill="#173028" stroke="none">TEACH</text>
+    <rect x="1460" y="430" width="300" height="112" rx="28"/><text x="1610" y="500" fill="#173028" stroke="none">COACH</text>
+    <rect x="1460" y="585" width="300" height="112" rx="28"/><text x="1610" y="655" fill="#173028" stroke="none">DRAW</text>
+  </g>
+  <g stroke="#f4d66b" stroke-width="8" fill="none" stroke-linecap="round">
+    <path d="M470 486 C560 486 585 480 640 485"/><path d="M470 640 C565 640 585 608 645 575"/>
+    <path d="M1275 485 C1340 480 1370 486 1450 486"/><path d="M1275 575 C1340 610 1370 640 1450 640"/>
+  </g>
+
+  <rect x="110" y="790" width="1700" height="178" rx="38" fill="#fbf6e9"/>
+  <rect x="150" y="830" width="455" height="96" rx="25" fill="#fff2b5" stroke="#e4c95c" stroke-width="3"/>
+  <text x="190" y="871" fill="#5b4a11" font-family="Helvetica Neue, Arial, sans-serif" font-size="26" font-weight="800">OPENROUTER</text>
+  <text x="190" y="906" fill="#655d47" font-family="Helvetica Neue, Arial, sans-serif" font-size="22">one routed model team</text>
+  <rect x="635" y="830" width="520" height="96" rx="25" fill="#eaf7ef" stroke="#a9d9bc" stroke-width="3"/>
+  <text x="675" y="871" fill="#195f39" font-family="Helvetica Neue, Arial, sans-serif" font-size="26" font-weight="800">WHISPER LARGE V3 TURBO</text>
+  <text x="675" y="906" fill="#476456" font-family="Helvetica Neue, Arial, sans-serif" font-size="22">voice questions → text</text>
+  <rect x="1185" y="830" width="585" height="96" rx="25" fill="#e9efff" stroke="#a5baf5" stroke-width="3"/>
+  <text x="1225" y="871" fill="#204ea9" font-family="Helvetica Neue, Arial, sans-serif" font-size="26" font-weight="800">GPT AUDIO MINI</text>
+  <text x="1225" y="906" fill="#4e6089" font-family="Helvetica Neue, Arial, sans-serif" font-size="22">calm, validated narration</text>
+</svg>

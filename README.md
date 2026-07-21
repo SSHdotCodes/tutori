@@ -92,6 +92,14 @@ the agent system. The source-of-truth model configuration is in
 pipeline and [`static/board.js`](./static/board.js) renders the structured board
 events.
 
+### OpenAI Build Week demo
+
+<video src="./Tutori_OpenAI_Build_Week_Demo.mp4" controls width="100%"></video>
+
+The 1:53 demo shows the working tutor and includes an English AI voiceover that
+explains the Codex workflow and GPT-5.6 integration. The exact narration is in
+[`docs/build-week-demo-script.txt`](./docs/build-week-demo-script.txt).
+
 ### Run locally
 
 ```bash
