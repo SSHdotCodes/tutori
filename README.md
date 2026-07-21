@@ -64,6 +64,34 @@ persistent whiteboard state, calmer speech, collision-aware diagrams, and a
 native scaled graph primitive with grids, ticks, legends, multiple data series,
 and markers.
 
+### How Codex and GPT-5.6 powered the Build Week edition
+
+This edition was meaningfully extended during OpenAI Build Week with Codex as
+the primary engineering environment. Codex helped audit and migrate the
+original Hugging Face Space to the production server, diagnose the stalled
+queue and silent-audio failures, refactor the streaming lesson pipeline, tune
+speech pacing, build deterministic whiteboard collision handling, add longer
+continuous sessions, write regression tests, deploy each iteration, and
+prepare this public repository and submission. The dated
+[commit history](https://github.com/SSHdotCodes/tutori/commits/main) preserves
+that work.
+
+The most important product decision made in that workflow was to keep drawing
+as structured, inspectable whiteboard operations instead of asking an image
+model for a finished picture. GPT-5.6 Luna decides what to teach, plans the
+visual sequence, and emits boxes, arrows, curves, labels, plots, erasures, and
+clear commands. Deterministic code then validates geometry, fits text, routes
+callouts, avoids collisions, and streams each operation to the Canvas renderer.
+That split lets GPT-5.6 handle pedagogy and visual reasoning while ordinary
+code guarantees legibility, timing, and recovery.
+
+At runtime, `openai/gpt-5.6-luna` is not decorative: it powers every planning,
+teaching, coaching, memory, research-synthesis, and whiteboard-vision role in
+the agent system. The source-of-truth model configuration is in
+[`engine.py`](./engine.py), while [`app.py`](./app.py) contains the Gradio event
+pipeline and [`static/board.js`](./static/board.js) renders the structured board
+events.
+
 ### Run locally
 
 ```bash
