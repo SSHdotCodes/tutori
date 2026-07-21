@@ -126,25 +126,6 @@ footer { visibility: hidden; }
   max-width: 300px;
 }
 
-#tutori-header .award-badge {
-  position: absolute;
-  z-index: 4;
-  left: 50%; top: -1px;
-  transform: translateX(-50%) rotate(-.7deg);
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 5px 12px 5px 9px;
-  border-radius: 999px 9px 999px 11px;
-  background: linear-gradient(135deg, #fff2bd, #f5c84d);
-  color: #4d3710 !important;
-  border: 1.5px solid #d9a91e;
-  box-shadow: 2px 3px 0 rgba(8, 14, 11, .45), 0 0 18px rgba(245, 200, 77, .18);
-  font-family: var(--sans); font-size: 11px; letter-spacing: .15px;
-  text-decoration: none !important;
-  white-space: nowrap;
-}
-#tutori-header .award-badge:hover { transform: translateX(-50%) translateY(-1px) rotate(0deg); }
-#tutori-header .award-badge .trophy { font-size: 15px; }
-
 /* badges = stickers slapped on the board */
 #tutori-header .badges {
   display: flex; gap: 6px 7px; flex-wrap: wrap;
@@ -528,20 +509,6 @@ body.board-big .side-col #mic-box { opacity: .35; transition: opacity .5s ease; 
 }
 #tutori-chat .wrapper, #tutori-chat .wrap { padding-top: 34px !important; }
 
-/* ---------- footer ---------- */
-#tutori-foot {
-  text-align: center; color: var(--chalk-dim);
-  padding: 10px 0 4px;
-  font-family: var(--hand); font-size: 16px;
-}
-#tutori-foot a { color: var(--honey); }
-#made-by {
-  margin-top: 4px; font-size: 10.5px; letter-spacing: .8px;
-  color: rgba(238, 243, 236, .4); text-transform: uppercase;
-  font-weight: 600; font-family: var(--sans);
-}
-
-
 /* ---------- responsive ---------- */
 @media (max-width: 1180px) {
   .board-col, .side-col {
@@ -571,15 +538,6 @@ body.board-big .side-col #mic-box { opacity: .35; transition: opacity .5s ease; 
   #tutori-header .logo .sub { font-size: 16px; }
   #tutori-header .squiggle { width: 170px; }
   #tutori-header .tag { font-size: 12.5px; }
-  #tutori-header .award-badge {
-    position: static;
-    order: -1;
-    align-self: center;
-    transform: rotate(-.7deg);
-    font-size: 9.5px;
-    padding: 4px 9px 4px 7px;
-  }
-  #tutori-header .award-badge:hover { transform: translateY(-1px) rotate(0deg); }
   .gradio-container {
     width: 100% !important;
     padding-left: 8px !important;

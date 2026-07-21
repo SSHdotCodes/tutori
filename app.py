@@ -3,8 +3,9 @@ Tutori — your personal whiteboard tutor.
 
 Speak (or type) a question. Tutori listens, gathers whatever context it needs,
 then teaches you out loud while sketching the idea on a whiteboard in real
-time. This deployment preserves the Build Small-winning Gradio experience
-while routing an upgraded open-weight model team through OpenRouter.
+time. The hosted Gradio edition uses GPT-5.6 Luna for every agentic role,
+Whisper Large V3 Turbo for transcription, and GPT Audio Mini for speech,
+all through OpenRouter.
 """
 
 import json
@@ -48,10 +49,10 @@ CSS = (ROOT / "static" / "style.css").read_text()
 FONT_FACES = (ROOT / "static" / "fonts" / "faces.css").read_text()
 
 PUBLIC_URL = "https://tutori.ssh.codes/"
-SHARE_IMAGE_URL = f"{PUBLIC_URL}static/tutori-share.png?v=20260721"
+SHARE_IMAGE_URL = f"{PUBLIC_URL}static/tutori-share.png?v=20260721-luna"
 SOCIAL_DESCRIPTION = (
     "Ask a question out loud and Tutori teaches it while drawing a clear, "
-    "live whiteboard lesson with open-weight AI."
+    "live whiteboard lesson powered by GPT-5.6 Luna through OpenRouter."
 )
 SOCIAL_META = f"""
 <meta name="description" content="{SOCIAL_DESCRIPTION}" />
@@ -89,16 +90,13 @@ HEADER_HTML = f"""
     </svg>
     <div class="tag">Ask anything out loud — Tutori researches it, then teaches you while sketching it live.</div>
   </div>
-  <a class="award-badge" href="https://huggingface.co/build-small-hackathon"
-     target="_blank" rel="noopener" aria-label="Tutori won fourth place at the Hugging Face Build Small Hackathon">
-    <span class="trophy">🏆</span><span><b>#4</b> · 4th place at Build Small</span>
-  </a>
   <div class="badges">
-    <span class="badge hot">⚡ OpenRouter · open-weight only</span>
-    <span class="badge">🧠 Tencent Hy3 teacher</span>
-    <span class="badge">🧭 Gemma 4 31B coach</span>
-    <span class="badge">🗣️ Kokoro 82M voice</span>
-    <span class="badge">👂 NVIDIA Parakeet ears</span>
+    <span class="badge hot">⚡ OpenRouter</span>
+    <span class="badge">🌙 GPT-5.6 Luna · every AI role</span>
+    <span class="badge">🧠 Low-reasoning agent</span>
+    <span class="badge">👁️ Luna whiteboard vision</span>
+    <span class="badge">👂 Whisper Large V3 Turbo</span>
+    <span class="badge">🗣️ GPT Audio Mini voice</span>
     <span class="badge">⏱️ Lessons up to 10 minutes</span>
   </div>
 </div>
@@ -148,7 +146,8 @@ N_CHIPS = len(CHIPS)
 
 
 def run_turn(audio_path, typed_text, snapshot, chat, convo, profile,
-             notes, board_ops, pace, lesson_minutes, web_on, voice_on):
+             notes, board_ops, pace, lesson_minutes, web_on, voice_on,
+             prepared=False):
     """Bridges ENGINE.run_turn events into streaming Gradio updates."""
     chat = list(chat or [])
     convo = list(convo or [])
@@ -165,8 +164,9 @@ def run_turn(audio_path, typed_text, snapshot, chat, convo, profile,
         return
 
     user_label = (typed_text or "").strip() or ("🎙️ …" if audio_path else "🖼️ (my whiteboard)")
-    chat.append({"role": "user", "content": user_label})
-    chat.append({"role": "assistant", "content": "✏️ *composing the first clean panel…*"})
+    if not prepared:
+        chat.append({"role": "user", "content": user_label})
+        chat.append({"role": "assistant", "content": "✏️ *composing the first clean panel…*"})
     question_for_context = user_label
     says = []
     sent_steps = []
@@ -246,6 +246,72 @@ def run_turn(audio_path, typed_text, snapshot, chat, convo, profile,
     yield render("done", "")
 
 
+def _prepare_request(chat, *, typed_text="", audio_path=None, snapshot=""):
+    """Acknowledge a submission before it enters Gradio's model queue."""
+    typed_text = (typed_text or "").strip()
+    if not (typed_text or audio_path or snapshot):
+        return gr.update(), {}, gr.update()
+
+    chat = list(chat or [])
+    if (chat and chat[-1].get("role") == "assistant" and
+            "composing the first clean panel" in str(chat[-1].get("content", ""))):
+        chat[-1] = {"role": "assistant", "content": "⏹️ *Interrupted by the new question.*"}
+    user_label = typed_text or ("🎙️ Listening…" if audio_path else "🖼️ (my whiteboard)")
+    chat.append({"role": "user", "content": user_label})
+    chat.append({"role": "assistant", "content": "✏️ *composing the first clean panel…*"})
+    request = {
+        "request_id": uuid.uuid4().hex,
+        "audio_path": audio_path,
+        "typed_text": typed_text,
+        "snapshot": snapshot or "",
+    }
+    return chat, request, ""
+
+
+def prepare_text_turn(typed_text, snapshot, chat):
+    # Deliberately omit the microphone component here. Gradio's file
+    # preprocessing made typed submissions wait behind stale/empty audio work.
+    return _prepare_request(chat, typed_text=typed_text, snapshot=snapshot)
+
+
+def prepare_chip_turn(chip_text, snapshot, chat):
+    return _prepare_request(chat, typed_text=chip_text, snapshot=snapshot)
+
+
+def prepare_audio_turn(audio_path, snapshot, chat):
+    return _prepare_request(chat, audio_path=audio_path, snapshot=snapshot)
+
+
+def prepare_board_turn(snapshot, chat):
+    return _prepare_request(chat, snapshot=snapshot)
+
+
+def run_prepared_turn(request, chat, convo, profile, notes, board_ops,
+                      pace, lesson_minutes, web_on, voice_on):
+    """Run one acknowledged request through the model-backed lesson engine."""
+    request = dict(request or {})
+    if not request:
+        return
+    for update in run_turn(
+        request.get("audio_path"), request.get("typed_text", ""),
+        request.get("snapshot", ""), chat, convo, profile, notes, board_ops,
+        pace, lesson_minutes, web_on, voice_on, prepared=True,
+    ):
+        # The full renderer also returns mic/text/chip controls. Never make
+        # those outputs of a long-running event: Gradio marks outputs pending,
+        # which used to disable Enter, Send, and examples mid-generation.
+        coach_values = update[9 + N_CHIPS:9 + 2 * N_CHIPS]
+        coach = ([value for value in coach_values if isinstance(value, str)]
+                 or gr.update())
+        yield (*update[:7], coach)
+
+
+def apply_coach_suggestions(suggestions):
+    suggestions = list(suggestions or CHIPS)[:N_CHIPS]
+    suggestions += CHIPS[len(suggestions):N_CHIPS]
+    return (*[gr.update(value=value) for value in suggestions], *suggestions)
+
+
 def reset_session():
     # chat, convo, typed text, board mirror, mic, research notes
     return [], [], "", [], gr.update(value=None), ""
@@ -269,6 +335,8 @@ with gr.Blocks(
     convo_state = gr.State([])
     notes_state = gr.State("")     # web research carried across the session
     board_state = gr.State([])     # ops currently on the board (server mirror)
+    pending_state = gr.State({})   # acknowledged request waiting for the model queue
+    coach_state = gr.State(CHIPS)  # updates chips separately so they never stay locked
 
     payload_box = gr.Textbox(
         visible=True, elem_id="tutori-payload", elem_classes="payload-sink",
@@ -322,13 +390,13 @@ with gr.Blocks(
                     info="1 = total beginner, tiny steps · 5 = expert, fast and dense",
                 )
                 lesson_minutes = gr.Slider(
-                    1, 10, value=1, step=1, label="Lesson length (minutes)",
-                    info="1 = quick Gemma lesson · 2–10 = deeper Hy3 whiteboard session.",
+                    1, 10, value=3, step=1, label="Lesson length (minutes)",
+                    info="3 minutes by default · 1 = quick answer · 2–10 = a deeper Luna whiteboard session.",
                 )
                 web_on = gr.Checkbox(True, label="🔎 Let Tutori research the web when useful")
                 voice_on = gr.Checkbox(
                     True,
-                    label="🔊 Voice replies (Kokoro 82M, with an instant device-voice fallback)",
+                    label="🔊 Voice replies with GPT Audio Mini",
                 )
 
             with gr.Accordion("🧠 What Tutori remembers about you", open=False):
@@ -339,18 +407,6 @@ with gr.Blocks(
                 )
                 profile_view = gr.JSON(value=EMPTY_PROFILE, label="Learner profile")
                 forget_btn = gr.Button("🗑️ Forget everything about me", size="sm")
-
-    gr.HTML(
-        '<div id="tutori-foot"><b>Our open-weight commitment:</b> Tutori will only use open-weight models, '
-        'a principle we carry forward thanks to the '
-        '<a href="https://huggingface.co/build-small-hackathon" target="_blank">'
-        "Hugging Face Build Small Hackathon</a>. "
-        'Visit the <a href="https://huggingface.co/spaces/build-small-hackathon/tutori" '
-        'target="_blank">original award-winning Space</a>. · '
-        "Hy3 teaches · Gemma coaches · Kokoro speaks · Parakeet listens."
-        '<div id="made-by">Made by SSH/ProCreations</div></div>'
-    )
-
 
     # ---------------- wiring ----------------
     # The `js` hook runs client-side BEFORE fn and its return replaces the
@@ -363,25 +419,84 @@ with gr.Blocks(
             "chat, convo, profile, notes, board, pace, minutes, web, voice]"
         )
 
-    turn_io = dict(
-        fn=run_turn,
-        inputs=[mic, text_in, snap_box, chatbot, convo_state, profile_state,
-                notes_state, board_state, pace, lesson_minutes, web_on, voice_on],
-        outputs=[payload_box, chatbot, convo_state, profile_state, profile_view,
-                 notes_state, board_state, mic, text_in,
-                 *chip_btns, *chip_states],
+    def _snap_chip_js(fn_name):
+        return (
+            "(chip, audio, snap, chat, convo, profile, notes, board, pace, minutes, web, voice) => "
+            f"[chip, audio, (window.{fn_name} ? window.{fn_name}() : ''), "
+            "chat, convo, profile, notes, board, pace, minutes, web, voice]"
+        )
+
+    turn_outputs = [
+        payload_box, chatbot, convo_state, profile_state, profile_view,
+        notes_state, board_state, mic, text_in, *chip_btns, *chip_states,
+    ]
+
+    prepared_inputs = [
+        pending_state, chatbot, convo_state, profile_state, notes_state,
+        board_state, pace, lesson_minutes, web_on, voice_on,
+    ]
+    prepared_outputs = [
+        payload_box, chatbot, convo_state, profile_state, profile_view,
+        notes_state, board_state, coach_state,
+    ]
+    prepared_io = dict(
+        fn=run_prepared_turn,
+        inputs=prepared_inputs,
+        outputs=prepared_outputs,
+        queue=True,
+        show_progress="hidden",
+        concurrency_id="tutori-lessons",
+        concurrency_limit=12,
+    )
+    prepare_outputs = [chatbot, pending_state, text_in]
+
+    coach_state.change(
+        fn=apply_coach_suggestions,
+        inputs=coach_state,
+        outputs=[*chip_btns, *chip_states],
+        queue=False,
         show_progress="hidden",
     )
 
-    turn_events = [
-        mic.stop_recording(js=_snap_js("tutoriSnapshotIfInk"), **turn_io),
-        text_in.submit(js=_snap_js("tutoriSnapshotIfInk"), **turn_io),
-        send_btn.click(js=_snap_js("tutoriSnapshotIfInk"), **turn_io),
-        ask_board_btn.click(js=_snap_js("tutoriSnapshot"), **turn_io),
+    # Every control first runs a tiny unqueued acknowledgement. Its guaranteed
+    # completion event starts the model generator; Gradio State.change does not
+    # reliably fire for State values returned by another server callback.
+    prepare_events = [
+        mic.stop_recording(
+            fn=prepare_audio_turn,
+            inputs=[mic, snap_box, chatbot], outputs=prepare_outputs,
+            js="(audio, snap, chat) => [audio, (window.tutoriSnapshotIfInk ? window.tutoriSnapshotIfInk() : ''), chat]",
+            queue=False, show_progress="hidden", trigger_mode="always_last",
+        ),
+        text_in.submit(
+            fn=prepare_text_turn,
+            inputs=[text_in, snap_box, chatbot], outputs=prepare_outputs,
+            js="(text, snap, chat) => [text, (window.tutoriSnapshotIfInk ? window.tutoriSnapshotIfInk() : ''), chat]",
+            queue=False, show_progress="hidden", trigger_mode="always_last",
+        ),
+        send_btn.click(
+            fn=prepare_text_turn,
+            inputs=[text_in, snap_box, chatbot], outputs=prepare_outputs,
+            js="(text, snap, chat) => [text, (window.tutoriSnapshotIfInk ? window.tutoriSnapshotIfInk() : ''), chat]",
+            queue=False, show_progress="hidden", trigger_mode="always_last",
+        ),
+        ask_board_btn.click(
+            fn=prepare_board_turn,
+            inputs=[snap_box, chatbot], outputs=prepare_outputs,
+            js="(snap, chat) => [(window.tutoriSnapshot ? window.tutoriSnapshot() : ''), chat]",
+            queue=False, show_progress="hidden", trigger_mode="always_last",
+        ),
     ]
     for btn, chip_state in zip(chip_btns, chip_states):
-        ev = btn.click(lambda s: s, chip_state, text_in)
-        turn_events.append(ev.then(js=_snap_js("tutoriSnapshotIfInk"), **turn_io))
+        prepare_events.append(btn.click(
+            fn=prepare_chip_turn,
+            inputs=[chip_state, snap_box, chatbot], outputs=prepare_outputs,
+            js="(chip, snap, chat) => [chip, (window.tutoriSnapshotIfInk ? window.tutoriSnapshotIfInk() : ''), chat]",
+            queue=False, show_progress="hidden", trigger_mode="always_last",
+        ))
+
+    turn_events = [event.then(**prepared_io, trigger_mode="always_last")
+                   for event in prepare_events]
 
     payload_box.change(fn=None, inputs=payload_box, outputs=None,
                        js="(p) => { window.tutoriOnPayload(p); }")
@@ -389,7 +504,7 @@ with gr.Blocks(
         reset_session, None,
         [chatbot, convo_state, text_in, board_state, mic, notes_state],
         js="() => { window.tutoriClearAll && window.tutoriClearAll(); return []; }",
-        cancels=turn_events,   # a mid-stream turn must die with the old lesson
+        cancels=turn_events,  # the instant acknowledgement has already completed
     )
     forget_btn.click(forget_me, None, [profile_state, profile_view])
     demo.load(lambda p: p or {}, profile_state, profile_view)
@@ -445,7 +560,7 @@ if __name__ == "__main__":
             media_type="text/html",
         )
 
-    demo.queue(default_concurrency_limit=4)
+    demo.queue(default_concurrency_limit=12)
     web = gr.mount_gradio_app(
         web,
         demo,

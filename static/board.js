@@ -32,12 +32,12 @@
     actx: null, bakedOps: [],          // committed agent ops [{op, seed}]
     userStrokes: [],                   // [{color, size, eraser, pts:[[x,y]..]}]
     queue: [], playing: false, curTurn: null, enqueued: 0,
-    curAudio: null, curSpeech: null, raf: 0,
+    curAudio: null, raf: 0,
     tool: { mode: "pen", color: "#2563eb", size: 0.45 },
     scale: 1, offX: 0, offY: 0,
     opSeedCounter: 1,
     voiceOn: true,
-    keepBoardUntil: 0, serverDone: false, voicePrimed: false,
+    keepBoardUntil: 0, serverDone: false,
     scrollTid: 0,
   };
 
@@ -153,10 +153,10 @@
       const fitPx = fitW * S.scale;
       if (w1 > fitPx) basePx = Math.max(8.5, basePx * fitPx / w1);
     }
-    if (fitH) {  // and vertically (squat shapes)
-      basePx = Math.max(8.5, Math.min(basePx, fitH * S.scale));
+    if (fitH) {  // first cap for a single line in a squat shape
+      basePx = Math.max(7, Math.min(basePx, fitH * S.scale));
     }
-    const supPx = basePx * 0.62;
+    let supPx = basePx * 0.62;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate((rnd() - 0.5) * 0.035);
@@ -165,28 +165,43 @@
     ctx.textBaseline = "middle";
     const fontFor = (sup) =>
       `600 ${sup ? supPx : basePx}px Caveat, "Comic Sans MS", cursive`;
-    const words = fullStr.split(" ").map(w => {
-      const segs = parseSupers(w);
-      let wpx = 0;
-      for (const s of segs) {
-        ctx.font = fontFor(s.sup);
-        s.w = ctx.measureText(s.t).width;
-        wpx += s.w;
-      }
-      return { segs, wpx };
-    });
-    ctx.font = fontFor(false);
-    const spaceW = ctx.measureText(" ").width;
     const maxW = (fitW || (size === "xl" ? 88 : 52)) * S.scale;
-    // wrap into lines
-    const lines = [];
-    let line = [], lw = 0;
-    for (const w of words) {
-      if (lw > 0 && lw + spaceW + w.wpx > maxW) { lines.push({ line, lw }); line = []; lw = 0; }
-      if (lw > 0) lw += spaceW;
-      line.push(w); lw += w.wpx;
+    const buildLines = () => {
+      supPx = basePx * 0.62;
+      const words = fullStr.trim().split(/\s+/).map(w => {
+        const segs = parseSupers(w);
+        let wpx = 0;
+        for (const s of segs) {
+          ctx.font = fontFor(s.sup);
+          s.w = ctx.measureText(s.t).width;
+          wpx += s.w;
+        }
+        return { segs, wpx };
+      });
+      ctx.font = fontFor(false);
+      const spaceW = ctx.measureText(" ").width;
+      const lines = [];
+      let line = [], lineW = 0;
+      for (const word of words) {
+        if (lineW > 0 && lineW + spaceW + word.wpx > maxW) {
+          lines.push({ line, lw: lineW }); line = []; lineW = 0;
+        }
+        if (lineW > 0) lineW += spaceW;
+        line.push(word); lineW += word.wpx;
+      }
+      if (line.length) lines.push({ line, lw: lineW });
+      return { lines, spaceW };
+    };
+    let layout = buildLines();
+    if (fitH && layout.lines.length > 1) {
+      const requiredH = basePx * (1 + (layout.lines.length - 1) * 1.06);
+      const availableH = fitH * S.scale;
+      if (requiredH > availableH) {
+        basePx = Math.max(7, basePx * availableH / requiredH);
+        layout = buildLines();
+      }
     }
-    if (line.length) lines.push({ line, lw });
+    const { lines, spaceW } = layout;
     // draw, spending the reveal budget char by char
     let ly = 0;
     for (const L of lines) {
@@ -620,54 +635,12 @@
     return arr.buffer;
   }
 
-  function speakWithDevice(text, done) {
-    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance || !text) {
-      done(); return null;
-    }
-    const utterance = new SpeechSynthesisUtterance(String(text));
-    utterance.rate = 1.04;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(v => /^en/i.test(v.lang) && /Samantha|Daniel|Ava|Alex|Google/i.test(v.name))
-                   || voices.find(v => /^en/i.test(v.lang));
-    if (preferred) utterance.voice = preferred;
-    let finished = false;
-    const finish = () => { if (!finished) { finished = true; done(); } };
-    utterance.onend = finish;
-    utterance.onerror = finish;
-    // Browser voices occasionally omit `end`; never stall the lesson forever.
-    setTimeout(finish, Math.max(6000, String(text).split(/\s+/).length * 520));
-    S.curSpeech = utterance;
-    window.speechSynthesis.speak(utterance);
-    return utterance;
-  }
-
-  function primeVoice() {
-    if (S.voicePrimed) return;
-    S.voicePrimed = true;
-    try { actx().resume(); } catch (_) {}
-    try {
-      if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
-        const unlock = new SpeechSynthesisUtterance(" ");
-        unlock.volume = 0;
-        unlock.rate = 10;
-        window.speechSynthesis.speak(unlock);
-      }
-    } catch (_) {}
-  }
-
-  // Run inside the learner's click gesture, before the network request begins,
-  // so browsers that gate speech behind user activation allow the later lesson.
-  document.addEventListener("pointerdown", primeVoice, { capture: true, passive: true });
-
   // ---------- lesson playback ----------
   async function playStep(step) {
     const ops = (step.board || []).map(o => ({ op: o, seed: (S.opSeedCounter++ * 2654435761) >>> 0 }));
     let dur = step.dur || Math.max(2.2, String(step.say || "").split(/\s+/).length * 0.36);
     let src = null;
     let audioEnded = true;   // true while there is no source; set false when one starts
-    let speechEnded = true;
 
     if (step.audio && S.voiceOn) {
       try {
@@ -686,9 +659,7 @@
     }
 
     if (!src && S.voiceOn && step.say) {
-      speechEnded = false;
-      setStatus("Device voice active · Kokoro unavailable", "teaching");
-      speakWithDevice(step.say, () => { speechEnded = true; S.curSpeech = null; });
+      setStatus("GPT Audio Mini narration unavailable · continuing with captions", "teaching");
     }
 
     setCaption(step.say || "");
@@ -730,7 +701,7 @@
         // next clip while this one's tail is still audible (voices overlap).
         // el > dur + 2 is only a safety net if `ended` never fires.
         const audioDone = src ? (audioEnded || el > dur + 2.0)
-                              : (speechEnded || el > dur + 8.0);
+                              : el > dur;
         if (bakedIdx >= sched.length && audioDone) {
           live.clearRect(0, 0, S.liveCv.width, S.liveCv.height);
           setTimeout(resolve, 140);   // natural breath between steps
@@ -809,7 +780,6 @@
       S.enqueued = 0;
       S.serverDone = false;
       S.stopFlag = true;                          // fast-forward whatever is playing
-      if (window.speechSynthesis) window.speechSynthesis.cancel();
       setTimeout(() => { S.stopFlag = false; }, 50);
       S.queue = [];
       // Gradio may focus the transcript/input after submit, which scrolls the
@@ -857,8 +827,6 @@
 
   window.tutoriStop = () => {
     S.stopFlag = true; S.queue = [];
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
-    S.curSpeech = null;
     setTimeout(() => { S.stopFlag = false; }, 60);
   };
 
@@ -996,8 +964,43 @@
     bindPen();
     fitCanvases();
     new ResizeObserver(fitCanvases).observe(S.wrap);
-    document.addEventListener("pointerdown", () => actx(), { once: true, capture: true });
+    // Prime cloud-audio playback after the control's own click handler runs.
+    // A capture-phase pointer handler can interfere with Gradio button clicks.
+    document.addEventListener("click", () => actx(), { once: true, passive: true });
+    const primeOnEnter = event => {
+      if (event.key !== "Enter") return;
+      actx();
+      document.removeEventListener("keydown", primeOnEnter);
+    };
+    document.addEventListener("keydown", primeOnEnter);
   }
+
+  // Gradio can ignore its native Textbox.submit event while another queued
+  // lesson is streaming. Route Enter through the Send button instead, which
+  // is an independent, unqueued acknowledgement path.
+  function bindSubmissionBridge() {
+    if (window.__tutoriSubmissionBridge) return;
+    window.__tutoriSubmissionBridge = true;
+
+    const typedInput = () => document.querySelector(
+      '.side-col textarea[placeholder*="type your question"]'
+    );
+    const sendButton = () => {
+      const node = document.querySelector("#send-btn");
+      return node?.matches("button") ? node : node?.querySelector("button");
+    };
+    document.addEventListener("keydown", event => {
+      const input = typedInput();
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing ||
+          !input || event.target !== input) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      actx();
+      sendButton()?.click();
+    }, true);
+  }
+
+  bindSubmissionBridge();
 
   // Gradio renders the DOM asynchronously; retry until the mount node exists.
   const tryMount = setInterval(() => {

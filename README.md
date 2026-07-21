@@ -41,23 +41,43 @@ datasets:
 
 # ✏️ Tutori — your whiteboard tutor
 
-## The `ssh.codes` hosted edition
+## OpenAI Build Week edition
 
-This repository now also powers [tutori.ssh.codes](https://tutori.ssh.codes),
-an upgraded Gradio deployment that preserves the original studio UI and canvas
-renderer while using an open-weight OpenRouter model team:
+**Live app:** [tutori.ssh.codes](https://tutori.ssh.codes)
 
-- `tencent/hy3` (low reasoning) for lesson architecture and teaching
-- `google/gemma-4-31b-it:nitro` for fast coaching and whiteboard vision
-- `nvidia/parakeet-tdt-0.6b-v3` for transcription
-- `hexgrad/kokoro-82m` with the `af_alloy` voice for fast text-to-speech
+Tutori is an agentic voice tutor that researches a question, plans a lesson,
+speaks it aloud, and draws the explanation on a continuous whiteboard. This
+open-source repository contains the Gradio application, agent orchestration,
+collision-aware layout engine, and hand-drawn Canvas renderer used by the live
+OpenAI Build Week submission.
 
-The hosted edition adds 1–10 minute continuous lessons, agent-controlled clear
-and targeted erase actions, persistent whiteboard state, and a native scaled
-graph primitive with grids, ticks, legends, multiple data series, and markers.
-In gratitude for the competition, Tutori's hosted model stack is committed to
-open-weight models only. The original Build Small Space remains available at
-[build-small-hackathon/tutori](https://huggingface.co/spaces/build-small-hackathon/tutori).
+The hosted edition uses this OpenRouter model stack:
+
+- `openai/gpt-5.6-luna` (low reasoning) for every agentic, teaching, coaching,
+  memory, and whiteboard-vision role
+- `openai/whisper-large-v3-turbo` for transcription
+- `openai/gpt-audio-mini` for spoken lesson audio
+
+The hosted edition defaults to a three-minute lesson and supports 1–10 minute
+continuous sessions, agent-controlled clear and targeted erase actions,
+persistent whiteboard state, calmer speech, collision-aware diagrams, and a
+native scaled graph primitive with grids, ticks, legends, multiple data series,
+and markers.
+
+### Run locally
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+export OPENROUTER_API_KEY="your-key"
+python app.py
+```
+
+Then open `http://127.0.0.1:7860`. The production deployment reads the same
+environment variable from its server secret store; no API key is committed.
+
+Licensed under Apache-2.0. See [`LICENSE`](./LICENSE).
 
 The remainder of this README documents the original award-winning ZeroGPU
 submission and is preserved as its historical build record.

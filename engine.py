@@ -1,11 +1,10 @@
 """
 Tutori engine — an OpenRouter-backed, long-horizon whiteboard tutor.
 
-Models (all open-weight, all routed through OpenRouter):
-  * tencent/hy3 ......................... lesson architect + teacher
-  * google/gemma-4-31b-it:nitro ......... fast coach + whiteboard vision
-  * nvidia/parakeet-tdt-0.6b-v3 ......... speech recognition
-  * hexgrad/kokoro-82m .................. fast open-weight speech
+Model roles:
+  * openai/gpt-5.6-luna ................ every agentic and visual intelligence role
+  * openai/whisper-large-v3-turbo ...... speech recognition
+  * openai/gpt-audio-mini ............... spoken lesson audio
 
 run_turn() is a generator that yields event dicts; app.py turns those into
 streaming UI updates. Events:
@@ -22,8 +21,12 @@ import io
 import json
 import os
 import re
+import subprocess
 import time
+import wave
+from array import array
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from difflib import SequenceMatcher
 
 import requests
 from board_quality import diagram_family, improve_step_board
@@ -33,11 +36,12 @@ if os.environ.get("TUTORI_DEBUG") == "1":
     faulthandler.dump_traceback_later(120, repeat=True)
 
 OPENROUTER_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
-LLM_ID = os.environ.get("TUTORI_INTELLIGENCE_MODEL", "tencent/hy3")
-COACH_ID = os.environ.get("TUTORI_FAST_MODEL", "google/gemma-4-31b-it:nitro")
-ASR_ID = os.environ.get("TUTORI_ASR_MODEL", "nvidia/parakeet-tdt-0.6b-v3")
-TTS_ID = os.environ.get("TUTORI_TTS_MODEL", "hexgrad/kokoro-82m")
-TTS_VOICE = os.environ.get("TUTORI_TTS_VOICE", "af_alloy")
+MODEL_ID = os.environ.get("TUTORI_MODEL", "openai/gpt-5.6-luna")
+LLM_ID = MODEL_ID
+COACH_ID = MODEL_ID
+ASR_ID = "openai/whisper-large-v3-turbo"
+TTS_ID = "openai/gpt-audio-mini"
+TTS_VOICE = "alloy"
 USE_BOARD_MODEL = False
 BOARD_ARTIST = None
 
@@ -60,7 +64,10 @@ def _headers(content_type="application/json"):
     return h
 
 
-print(f"[tutori] OpenRouter stack: {LLM_ID} | {COACH_ID} | {ASR_ID} | {TTS_ID}", flush=True)
+print(
+    f"[tutori] OpenRouter stack: agents={MODEL_ID} | asr={ASR_ID} | tts={TTS_ID}",
+    flush=True,
+)
 
 
 # --------------------------------------------------------------------------
@@ -109,6 +116,11 @@ never place two elements at overlapping coordinates. Use compact diagrams: the m
 shape should usually occupy less than half the board width so there is room for
 formulas, examples, and callouts. Use callouts instead of large explanatory text
 inside the diagram.
+Keep every label fully inside its owning shape with clear padding from the border.
+Never draw a callout ring across a word, multi-word label, box, or ellipse: rings are
+only for a tiny symbol or unlabeled point. To explain a labeled shape, connect from
+its OUTER EDGE to a compact note in open space. Before returning JSON, mentally trace
+every box, label, connector, and note and move anything whose visible ink would touch.
 Curves must trace the TRUE shape of what you describe — and REMEMBER y grows
 DOWNWARD: higher on the board means SMALLER y. Plan every point: an ascent has
 DECREASING y; a valley's minimum sits at the LARGEST y; a rocket reaching orbit
@@ -155,6 +167,8 @@ Rules for "steps":
   always contain a coherent, useful diagram—not empty space or accumulated clutter.
 - Step 1 usually includes a short title (a fresh one for this answer).
 - Never place two elements of THIS turn at overlapping coordinates.
+- Never place a callout circle over a word or a box label. Circle only a tiny symbol
+  or unlabeled point; explain labeled shapes from their outer edge instead.
 - Plan the layout: main diagram on the left two-thirds (x 4-62), side notes in the
   right column (x 66-96). Keep related items adjacent.
 - Write a label and its value as ONE text op ("Context window: 1 million tokens"),
@@ -355,14 +369,16 @@ def llm_generate(messages, max_new_tokens=256, temperature=0.35):
     return openrouter_chat(
         messages, model=LLM_ID, max_tokens=max_new_tokens,
         temperature=temperature, reasoning="low",
+        timeout=75,
     )
 
 
 def cpm_generate(messages, max_new_tokens=220):
-    """Compatibility name for the fast Gemma coach/planner path."""
+    """Compatibility name for the fast Luna coach/planner path."""
     return openrouter_chat(
         messages, model=COACH_ID, max_tokens=max_new_tokens,
         temperature=0.2,
+        timeout=60,
     )
 
 
@@ -610,6 +626,34 @@ def _snap_endpoint_to_edge(pt, other, placed):
         )
         return _clamp_pt([cx + dx * scale, cy + dy * scale])
     return pt
+
+
+def _move_callout_ring_to_shape_edge(op, board):
+    """Keep a callout ring off the centered label inside a labeled shape."""
+    try:
+        ax, ay = map(float, op.get("around", [50, 38]))
+        tx, ty = map(float, op.get("to", [ax + 8, ay - 6]))
+    except Exception:
+        return
+    for shape in reversed(board):
+        if shape is op or shape.get("_drop") or not shape.get("label"):
+            continue
+        if shape.get("op") not in ("box", "ellipse", "polygon"):
+            continue
+        bb = _op_bbox(shape)
+        if not bb or not (bb[0] < ax < bb[2] and bb[1] < ay < bb[3]):
+            continue
+        cx, cy = (bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2
+        dx, dy = tx - cx, ty - cy
+        if abs(dx) + abs(dy) < 0.01:
+            dx, dy = 1.0, 0.0
+        scale = min(
+            abs((bb[2] - cx) / dx) if dx else 1e9,
+            abs((bb[3] - cy) / dy) if dy else 1e9,
+        )
+        op["around"] = _clamp_pt([cx + dx * scale, cy + dy * scale])
+        op["r"] = min(float(op.get("r", 3.0) or 3.0), 1.4)
+        return
 
 
 def _seg_samples(a, b, step_len=7.0):
@@ -867,6 +911,7 @@ def layout_pass(board, placed, displaced, anchors, state):
             elif kind == "callout":
                 op["around"] = _shift_pt(op.get("around", [50, 38]), displaced)
                 op["to"] = _shift_pt(op.get("to", [60, 32]), displaced)
+                _move_callout_ring_to_shape_edge(op, out)
                 _cap_callout(op)
                 r = float(op.get("r", 3.0) or 3.0)
                 ax, ay = op["around"]
@@ -1339,48 +1384,178 @@ def transcribe(audio_path):
         headers=_headers(), json=payload, timeout=180,
     )
     if not r.ok:
-        raise RuntimeError(f"Parakeet transcription failed ({r.status_code}): {r.text[:200]}")
+        raise RuntimeError(f"Whisper transcription failed ({r.status_code}): {r.text[:200]}")
     return str(r.json().get("text") or "").strip()
 
 
 _SPOKEN_CLEAN = re.compile(r"[*_#`<>\[\]{}|\\~^]")
 _TTS_BLOCKED_UNTIL = 0.0
 _TTS_BLOCK_REASON = ""
+_TTS_TEMPO = 0.90
+
+
+def _speech_matches(source, transcript):
+    """Reject accidental preambles, repetitions, and truncated narration."""
+    if not transcript:
+        return True
+    clean = lambda value: re.findall(r"[a-z0-9]+", str(value).lower())
+    expected, heard = clean(source), clean(transcript)
+    if not expected or not heard:
+        return True
+    ratio = SequenceMatcher(None, expected, heard).ratio()
+    return ratio >= 0.84 and len(heard) <= len(expected) * 1.25 + 3
+
+
+def _encode_browser_audio(pcm):
+    """Shrink provider PCM and apply a calm, pitch-preserving teaching tempo."""
+    try:
+        encoded = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", "pipe:0",
+                "-filter:a", f"atempo={_TTS_TEMPO}",
+                "-f", "mp3", "-b:a", "48k", "pipe:1",
+            ],
+            input=pcm, capture_output=True, check=True, timeout=30,
+        ).stdout
+        if encoded:
+            return encoded, "mp3", _TTS_TEMPO
+    except Exception as exc:  # noqa: BLE001
+        print(f"[tutori] MP3 compression unavailable; sending WAV: {exc!r}", flush=True)
+    wav_buffer = io.BytesIO()
+    with wave.open(wav_buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(24000)
+        wav_file.writeframes(pcm)
+    return wav_buffer.getvalue(), "wav", 1.0
 
 
 def synthesize(text):
-    """Text -> (base64 MP3, estimated duration). Browser corrects from decoded audio."""
+    """Text -> (base64 audio, duration) via validated GPT Audio Mini speech."""
     global _TTS_BLOCKED_UNTIL, _TTS_BLOCK_REASON
     spoken = _SPOKEN_CLEAN.sub("", text).strip()
     if not spoken:
         return None, 1.5
     if time.time() < _TTS_BLOCKED_UNTIL:
         return None, max(2.2, len(spoken.split()) * 0.36)
-    try:
-        payload = {
-            "model": TTS_ID,
-            "input": spoken[:1000],
-            "voice": TTS_VOICE,
-            "response_format": "mp3",
-        }
-        r = requests.post(
-            f"{OPENROUTER_URL}/audio/speech",
-            headers=_headers(), json=payload, timeout=45,
-        )
-        if not r.ok:
-            raise RuntimeError(f"Kokoro speech failed ({r.status_code}): {r.text[:200]}")
-        _TTS_BLOCK_REASON = ""
-        return base64.b64encode(r.content).decode("ascii"), max(2.0, len(spoken.split()) / 2.25)
-    except Exception as e:
-        reason = str(e)
-        _TTS_BLOCK_REASON = reason[:220]
-        # OpenRouter account privacy rules can make a speech provider
-        # unavailable. Avoid repeating a doomed request for every sentence;
-        # the browser will narrate locally during this short retry window.
-        if "ignored" in reason.lower() or "provider" in reason.lower() or "404" in reason:
-            _TTS_BLOCKED_UNTIL = time.time() + 60
-        print(f"[tutori] Kokoro unavailable; using browser voice: {reason[:220]}", flush=True)
-        return None, max(2.2, len(spoken.split()) * 0.36)
+    last_error = None
+    for attempt in range(2):
+        try:
+            word_count = len(spoken.split())
+            if attempt == 0:
+                system_prompt = (
+                    "You are a literal text-to-speech engine. Never answer or discuss "
+                    "the script. Your spoken response contains only the script itself. "
+                    "Use a calm teaching cadence, slightly slower than ordinary conversation, "
+                    "with brief natural pauses at sentence boundaries."
+                )
+                user_prompt = (
+                    "Read the script inside the tags verbatim. Do not speak the tags "
+                    f"or these instructions. <SCRIPT>{spoken[:1000]}</SCRIPT>"
+                )
+            else:
+                system_prompt = (
+                    "You narrate application copy. Return the supplied copy word for "
+                    "word, with no preface, reaction, answer, explanation, or added words. "
+                    "Speak in a calm, slightly slow teaching cadence."
+                )
+                user_prompt = f"COPY START\n{spoken[:1000]}\nCOPY END"
+            payload = {
+                "model": TTS_ID,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "modalities": ["text", "audio"],
+                "audio": {"voice": TTS_VOICE, "format": "pcm16"},
+                "stream": True,
+                "temperature": 0.0,
+                # Leave enough room for the audio decoder. Provider-added silence
+                # is trimmed below, so a safe budget no longer bloats playback.
+                "max_completion_tokens": min(
+                    2400, max(384, 180 + word_count * (22 + attempt * 4))
+                ),
+            }
+            audio_chunks, transcript_chunks = [], []
+            stream_error = None
+            with requests.post(
+                f"{OPENROUTER_URL}/chat/completions",
+                headers=_headers(), json=payload, timeout=90, stream=True,
+            ) as r:
+                if not r.ok:
+                    raise RuntimeError(
+                        f"GPT Audio Mini speech failed ({r.status_code}): {r.text[:200]}"
+                    )
+                for raw_line in r.iter_lines(decode_unicode=True):
+                    line = str(raw_line or "").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("error"):
+                        stream_error = event["error"]
+                        break
+                    choices = event.get("choices") or []
+                    if not choices:
+                        continue
+                    audio = (choices[0].get("delta") or {}).get("audio") or {}
+                    if isinstance(audio, dict):
+                        if audio.get("data"):
+                            audio_chunks.append(str(audio["data"]))
+                        if audio.get("transcript"):
+                            transcript_chunks.append(str(audio["transcript"]))
+            transcript = "".join(transcript_chunks).strip()
+            if not audio_chunks:
+                raise RuntimeError(f"GPT Audio Mini returned no audio ({stream_error!r})")
+            if not _speech_matches(spoken, transcript):
+                raise RuntimeError(
+                    f"GPT Audio Mini narration mismatch: {transcript[:140]!r}"
+                )
+            # OpenRouter documents the chunks as one base64 stream. Decoding each
+            # chunk separately can corrupt bytes at chunk boundaries and glitch.
+            joined = "".join(audio_chunks)
+            pcm = base64.b64decode(joined + "=" * (-len(joined) % 4))
+            if len(pcm) < 4800:
+                raise RuntimeError("GPT Audio Mini returned an empty audio stream")
+            # Remove provider-added silence while keeping a short natural tail.
+            samples = array("h")
+            samples.frombytes(pcm)
+            first_audible = next(
+                (i for i, sample in enumerate(samples) if abs(sample) >= 180), None
+            )
+            last_audible = next(
+                (i for i in range(len(samples) - 1, -1, -1)
+                 if abs(samples[i]) >= 180), None,
+            )
+            if first_audible is not None and last_audible is not None:
+                start = max(0, first_audible - 2400)
+                end = min(len(samples), last_audible + 8400)
+                pcm = samples[start:end].tobytes()
+            browser_audio, audio_format, playback_tempo = _encode_browser_audio(pcm)
+            _TTS_BLOCK_REASON = ""
+            duration = max(0.5, len(pcm) / (24000 * 2 * playback_tempo))
+            print(
+                f"[tutori] GPT Audio Mini ready: {word_count} words, "
+                f"{duration:.1f}s, {audio_format}, attempt {attempt + 1}",
+                flush=True,
+            )
+            return base64.b64encode(browser_audio).decode("ascii"), duration
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            if attempt == 0:
+                print(f"[tutori] GPT Audio Mini retrying: {str(exc)[:180]}", flush=True)
+    reason = str(last_error)
+    _TTS_BLOCK_REASON = reason[:220]
+    if "ignored" in reason.lower() or "provider" in reason.lower() or "404" in reason:
+        _TTS_BLOCKED_UNTIL = time.time() + 30
+    print(f"[tutori] GPT Audio Mini unavailable; captions only: {reason[:220]}", flush=True)
+    return None, max(2.2, len(spoken.split()) * 0.36)
 
 
 # --------------------------------------------------------------------------
@@ -1426,7 +1601,7 @@ The NEXT questions are about the topic just taught, in the learner's own voice,
 
 
 def coach_update(question, says, profile, pace):
-    """Post-lesson: MiniCPM updates the learner profile + offers next steps."""
+    """Post-lesson: Luna updates the learner profile and offers next steps."""
     lesson_text = " ".join(says)[:900]
     msgs = [{"role": "system", "content": COACH_SYSTEM},
             {"role": "user", "content":
@@ -1539,7 +1714,7 @@ def decide_search(question, profile, notes):
     try:
         raw = cpm_generate(msgs, max_new_tokens=160)
     except Exception as e:
-        print(f"[tutori] MiniCPM planner failed ({e!r}); falling back to Gemma")
+        print(f"[tutori] Luna planner failed ({e!r}); retrying with the lesson path")
         try:
             raw = llm_generate(msgs, max_new_tokens=96, temperature=0.0)
         except Exception as e2:
@@ -1645,10 +1820,8 @@ def build_agent_plan(question, history, profile, notes, board_now, board_observa
                      minutes, web_on):
     """Build a useful plan locally so teaching is not gated on a second LLM call.
 
-    Hy3 still performs the high-intelligence lesson generation. The old version
-    called Hy3 once to plan and again to teach, which doubled the time before the
-    learner saw a single mark. Deterministic routing is both faster and more
-    reliable for this small schema.
+    Luna performs all intelligence work. Deterministic routing keeps this small
+    schema fast while Luna concentrates on the lesson and its visual structure.
     """
     family = diagram_family(question)
     if minutes <= 1:
@@ -1673,10 +1846,8 @@ def build_agent_plan(question, history, profile, notes, board_now, board_observa
 
 
 def select_teacher_model(question, minutes, web_context="", board_observation=""):
-    """Use Nitro for a quick answer; reserve Hy3 for deeper agentic lessons."""
-    is_quick = int(minutes or 1) <= 1
-    simple = len(str(question).split()) <= 30 and not web_context and not board_observation
-    return COACH_ID if is_quick and simple else LLM_ID
+    """Every teaching path uses GPT-5.6 Luna through OpenRouter."""
+    return MODEL_ID
 
 
 def known_quick_fallback(question):
@@ -1772,7 +1943,7 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
     try:
         question = (typed_text or "").strip()
         if audio_path:
-            yield {"type": "status", "status": "thinking", "detail": "Listening with Parakeet…"}
+            yield {"type": "status", "status": "thinking", "detail": "Listening with Whisper…"}
             heard = transcribe(audio_path)
             question = f"{heard} {question}".strip() if question else heard
             yield {"type": "transcript", "text": question}
@@ -1811,17 +1982,14 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
         teacher_model = select_teacher_model(question, minutes, web_context, board_observation)
         deep_future = None
         generation_pool = None
-        if teacher_model == LLM_ID:
-            # Hy3 is deliberately thoughtful but can take close to a minute
-            # before returning visible tokens through its OpenRouter provider.
-            # Start it now, then let Nitro teach a one-minute visual overview
-            # immediately. The deeper chapter arrives while that overview is
-            # already being spoken and drawn.
+        if minutes > 1:
+            # Start a deeper Luna chapter in parallel with a concise Luna visual
+            # overview so a long lesson draws its first useful panel quickly.
             deep_minutes = max(1, minutes - 1)
             _, _, deep_guidance = _duration_spec(deep_minutes)
             deep_plan = dict(plan)
             deep_plan["warm_start_context"] = (
-                "A one-minute Gemma visual overview plays first. Begin with a "
+                "A one-minute Luna visual overview plays first. Begin with a "
                 "fresh deeper chapter; avoid greetings and do not repeat the basic overview."
             )
             deep_msgs = _build_messages(
@@ -1847,27 +2015,27 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
                 question, history, profile, pace, web_context, quick_plan,
                 board_observation, quick_guidance, notes=notes or "", board_now=board_now,
             )
-            teacher_model = COACH_ID
-            teacher_name = "Gemma Nitro"
+            teacher_model = MODEL_ID
+            teacher_name = "GPT-5.6 Luna"
             max_tokens = 3200
-            reasoning = None
-            detail = "Gemma starts now while Hy3 prepares the deeper chapter…"
+            reasoning = "low"
+            detail = "Luna starts the first panel while a deeper chapter is prepared…"
         else:
-            teacher_name = "Gemma Nitro"
+            teacher_name = "GPT-5.6 Luna"
             msgs = _build_messages(
                 question, history, profile, pace, web_context, plan,
                 board_observation, duration_guidance, notes=notes or "", board_now=board_now,
             )
             max_tokens = 3200
-            reasoning = None
-            detail = "Gemma Nitro is sketching the first panel…"
+            reasoning = "low"
+            detail = "GPT-5.6 Luna is sketching the first panel…"
         yield {"type": "status", "status": "teaching", "detail": detail}
-        pool = ThreadPoolExecutor(max_workers=3) if voice_on else None
+        pool = ThreadPoolExecutor(max_workers=4) if voice_on else None
         active_ops = list(board_now or [])[-80:]
         said = []
         n_steps = 0
 
-        def prepare_step(raw_step, idx):
+        def prepare_step(raw_step, idx, audio_future=None):
             nonlocal active_ops
             if not isinstance(raw_step, dict):
                 return None
@@ -1896,42 +2064,48 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
 
             audio_b64, dur = None, None
             if pool and step["say"]:
-                future = pool.submit(synthesize, step["say"])
+                future = audio_future or pool.submit(synthesize, step["say"])
                 try:
-                    # Never hold the first visible panel hostage to a slow TTS
-                    # provider. The client narrates locally if this deadline wins.
-                    audio_b64, dur = future.result(timeout=6 if idx == 0 else 3)
+                    # GPT Audio Mini is the only narrator. Wait for its parallel
+                    # render instead of abruptly switching to a device voice.
+                    audio_b64, dur = future.result(timeout=110)
                 except FutureTimeout:
-                    print(f"[tutori] Kokoro step {idx + 1} exceeded the fast path; "
-                          "using browser voice", flush=True)
+                    print(f"[tutori] GPT Audio Mini step {idx + 1} timed out; captions only",
+                          flush=True)
                 except Exception as exc:
                     print(f"[tutori] voice step {idx + 1} failed: {exc!r}", flush=True)
             step["audio"] = audio_b64
             step["dur"] = dur or max(2.2, len(step["say"].split()) / 2.25)
-            step["voice_fallback"] = bool(voice_on and not audio_b64)
+            step["voice_missing"] = bool(voice_on and not audio_b64)
             return step
 
-        # Nitro usually returns this four-step chapter in a few seconds. Its
+        # Luna usually returns this four-step chapter in a few seconds. Its
         # provider occasionally emits partial/cumulative SSE chunks, so a
         # normal JSON response is measurably more reliable than reconstructing
-        # the lesson client-side and is still dramatically faster than Hy3.
+        # partial JSON on the client.
         full_text = ""
         raw_steps = []
         best_text, best_steps = "", []
-        for attempt, temperature in enumerate((0.34, 0.20, 0.10), start=1):
-            candidate_text = openrouter_chat(
-                msgs, model=teacher_model, max_tokens=max_tokens,
-                temperature=temperature, json_mode=True, reasoning=reasoning,
-                timeout=180,
-            )
+        for attempt, temperature in enumerate((0.34, 0.14), start=1):
+            try:
+                candidate_text = openrouter_chat(
+                    msgs, model=teacher_model, max_tokens=max_tokens,
+                    temperature=temperature, json_mode=True, reasoning=reasoning,
+                    timeout=75,
+                )
+            except Exception as exc:
+                print(f"[tutori] Luna attempt {attempt} failed: {exc!r}", flush=True)
+                continue
             candidate_steps = extract_lesson_steps(candidate_text)
             if len(candidate_steps) > len(best_steps):
                 best_text, best_steps = candidate_text, candidate_steps
             if len(candidate_steps) >= 3:
                 break
-            print(f"[tutori] Nitro attempt {attempt} returned "
+            print(f"[tutori] Luna attempt {attempt} returned "
                   f"{len(candidate_steps)} lesson steps; retrying", flush=True)
         full_text, raw_steps = best_text, best_steps
+        if not full_text and not raw_steps:
+            raise RuntimeError("GPT-5.6 Luna timed out before the first panel")
         reliable = known_quick_fallback(question)
         if len(raw_steps) < 3 and reliable:
             print("[tutori] using the verified quick lesson fallback", flush=True)
@@ -1942,8 +2116,13 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
                           "board": []}]
         print(f"[tutori] quick chapter: {len(raw_steps)} raw steps, "
               f"{len(full_text)} chars", flush=True)
+        quick_audio_futures = {}
+        if pool:
+            for idx, raw_step in enumerate(raw_steps[:8]):
+                if isinstance(raw_step, dict) and raw_step.get("say"):
+                    quick_audio_futures[idx] = pool.submit(synthesize, raw_step["say"])
         for idx, raw_step in enumerate(raw_steps[:8]):
-            step = prepare_step(raw_step, idx)
+            step = prepare_step(raw_step, idx, quick_audio_futures.get(idx))
             if not step:
                 continue
             if n_steps == 0:
@@ -1954,12 +2133,19 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
             yield {"type": "step", "step": step}
         if deep_future is not None:
             yield {"type": "status", "status": "thinking",
-                   "detail": "Hy3 is preparing the deeper whiteboard chapter…"}
+                   "detail": "Luna is preparing the deeper whiteboard chapter…"}
             try:
                 deep_text = deep_future.result(timeout=360)
                 deep_steps = extract_lesson_steps(deep_text)
-                print(f"[tutori] Hy3 deeper chapter: {len(deep_steps)} raw steps, "
+                print(f"[tutori] Luna deeper chapter: {len(deep_steps)} raw steps, "
                       f"{len(deep_text)} chars", flush=True)
+                deep_audio_futures = {}
+                if pool:
+                    for deep_idx, raw_step in enumerate(deep_steps):
+                        if isinstance(raw_step, dict) and raw_step.get("say"):
+                            deep_audio_futures[deep_idx] = pool.submit(
+                                synthesize, raw_step["say"]
+                            )
                 for deep_idx, raw_step in enumerate(deep_steps):
                     if n_steps >= 24:
                         break
@@ -1970,9 +2156,11 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
                                    for op in raw_board):
                             raw_step["board"] = [{"op": "clear"}] + raw_board
                     # Indices 0-7 are reserved for trusted quick templates.
-                    # Starting the deeper chapter at 8 lets Hy3 use its own
+                    # Starting the deeper chapter at 8 lets Luna use its own
                     # coordinates after the explicit chapter clear.
-                    step = prepare_step(raw_step, 8 + deep_idx)
+                    step = prepare_step(
+                        raw_step, 8 + deep_idx, deep_audio_futures.get(deep_idx)
+                    )
                     if not step:
                         continue
                     said.append(step["say"])
@@ -1981,7 +2169,7 @@ def run_turn(audio_path, typed_text, board_snapshot, history, profile,
             except Exception as exc:
                 # The learner already received a complete quick lesson. A deep
                 # model hiccup should not turn that successful turn into an error.
-                print(f"[tutori] Hy3 deeper chapter unavailable: {exc!r}", flush=True)
+                print(f"[tutori] Luna deeper chapter unavailable: {exc!r}", flush=True)
             finally:
                 if generation_pool:
                     generation_pool.shutdown(wait=False)
@@ -2010,6 +2198,8 @@ def tts_only(text):
 
 
 MODELS_INFO = {
-    "llm": LLM_ID, "coach": COACH_ID, "tts": TTS_ID, "asr": ASR_ID,
+    "model": MODEL_ID,
+    "llm": MODEL_ID, "coach": MODEL_ID, "vision": MODEL_ID,
+    "tts": TTS_ID, "asr": ASR_ID,
     "mode": "openrouter",
 }

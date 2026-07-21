@@ -9,9 +9,9 @@
       <stop offset="0" stop-color="#fffdf6"/>
       <stop offset="1" stop-color="#f8f0dc"/>
     </linearGradient>
-    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#fff1ae"/>
-      <stop offset="1" stop-color="#efba31"/>
+    <linearGradient id="luna" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e9e4ff"/>
+      <stop offset="1" stop-color="#b9a8ff"/>
     </linearGradient>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
       <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#07100b" flood-opacity=".5"/>
@@ -39,10 +39,11 @@
     </g>
 
     <g transform="translate(844 35) rotate(.8 145 31)">
-      <rect width="300" height="62" rx="24" fill="url(#gold)" stroke="#d39c17" stroke-width="2"/>
-      <text x="20" y="42" font-size="31">🏆</text>
-      <text x="66" y="29" fill="#4d3710" font-size="18" font-weight="800">#4 · BUILD SMALL</text>
-      <text x="66" y="49" fill="#60491f" font-size="13" font-weight="700" letter-spacing="1.2">HACKATHON WINNER</text>
+      <rect width="300" height="62" rx="24" fill="url(#luna)" stroke="#8d77df" stroke-width="2"/>
+      <circle cx="34" cy="31" r="14" fill="#5c47ae"/>
+      <circle cx="40" cy="25" r="13" fill="#ded7ff"/>
+      <text x="66" y="29" fill="#332565" font-size="18" font-weight="800">GPT-5.6 LUNA</text>
+      <text x="66" y="49" fill="#52437f" font-size="13" font-weight="700" letter-spacing="1.2">POWERED BY OPENROUTER</text>
     </g>
 
     <g filter="url(#shadow)">
@@ -59,11 +60,11 @@
       <text x="0" y="194" fill="#5c574c" font-size="22">A voice-first tutor that teaches while</text>
       <text x="0" y="225" fill="#5c574c" font-size="22">drawing the idea live on a whiteboard.</text>
       <g transform="translate(0 274)">
-        <rect width="171" height="42" rx="21" fill="#e7efe8" stroke="#bdccbf"/>
-        <circle cx="23" cy="21" r="7" fill="#24a558"/>
-        <text x="40" y="28" fill="#355044" font-size="16" font-weight="700">Open-weight AI</text>
-        <rect x="185" width="153" height="42" rx="21" fill="#ece9fb" stroke="#c8c1e9"/>
-        <text x="207" y="28" fill="#4c3f78" font-size="16" font-weight="700">Live diagrams</text>
+        <rect width="184" height="42" rx="21" fill="#ece9fb" stroke="#c8c1e9"/>
+        <circle cx="23" cy="21" r="7" fill="#6d55cc"/>
+        <text x="40" y="28" fill="#4c3f78" font-size="16" font-weight="700">GPT-5.6 Luna</text>
+        <rect x="198" width="195" height="42" rx="21" fill="#e7efe8" stroke="#bdccbf"/>
+        <text x="220" y="28" fill="#355044" font-size="16" font-weight="700">Voice + live diagrams</text>
       </g>
     </g>
 
