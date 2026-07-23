@@ -344,7 +344,7 @@ with gr.Blocks(
     )
     snap_box = gr.Textbox(visible=False)
 
-    gr.HTML(HEADER_HTML)
+    gr.HTML(HEADER_HTML, elem_id="tutori-header-shell")
 
     with gr.Row(equal_height=False, elem_classes="studio-row"):
         # ---------------- whiteboard ----------------

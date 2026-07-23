@@ -85,6 +85,16 @@ footer { visibility: hidden; }
   overflow: hidden !important;
 }
 
+/* Gradio gives standalone HTML blocks `overflow: auto` inline. The header's
+   hand-drawn details and wrapping badges should grow naturally, never sprout
+   their own scrollbar. */
+#tutori-header-shell {
+  overflow: visible !important;
+}
+#tutori-header-shell > .html-container {
+  overflow: visible !important;
+}
+
 /* ---------- chalk header (compact single row) ---------- */
 #tutori-header {
   position: relative;
@@ -129,16 +139,17 @@ footer { visibility: hidden; }
 /* badges = stickers slapped on the board */
 #tutori-header .badges {
   display: flex; gap: 6px 7px; flex-wrap: wrap;
+  flex: 1 1 auto;
+  align-items: center;
+  align-content: center;
   justify-content: flex-start;
   min-width: 0;
-  max-width: min(980px, calc(100vw - 620px));
+  max-width: none;
   overflow: visible;
-  /* keep clear of the HF mini-header pill pinned top-right */
-  margin-right: clamp(180px, 17vw, 310px);
-  max-height: 52px;
-  padding-top: 22px;
+  margin: 0;
+  max-height: none;
+  padding: 0;
 }
-@media (max-width: 1380px) { #tutori-header .badges { margin-right: 0; max-width: calc(100vw - 390px); } }
 @media (max-width: 1080px) {
   #tutori-header { flex-wrap: nowrap; min-height: 64px; }
   #tutori-header .head-left { flex: 1 1 auto; }
